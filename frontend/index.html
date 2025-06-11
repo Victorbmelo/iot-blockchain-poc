@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Material Tracker PoC</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        input, select, button { padding: 0.5rem; margin: 0.5rem 0; width: 100%; max-width: 300px; }
+        #result { margin-top: 1rem; font-weight: bold; }
+        #qrImg { width: 200px; display: none; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <h1>Material Tracker PoC</h1>
+
+    <!-- Dropdown of IDs -->
+    <label for="qrSelect">Select Material ID:</label><br>
+    <select id="qrSelect"></select><br>
+
+    <!-- QR image display -->
+    <img id="qrImg" src="" alt="QR code">
+
+    <!-- Download button -->
+    <!-- <button id="downloadBtn" style="display:none;">Download QR Code</button> -->
+    <a id="downloadBtn" href="#" download style="
+        display:none;
+        padding:0.5rem; margin:0.5rem 0;
+        background:#007bff; color:#fff; text-decoration:none;
+        border-radius:4px;
+    ">Download QR Code</a><br>
+
+
+    <!-- Manual entry fallback -->
+    <label for="matId">Or enter Material ID manually:</label><br>
+    <input type="text" id="matId" placeholder="e.g., MAT-001"><br>
+
+    <label for="loc">Location:</label><br>
+    <input type="text" id="loc" placeholder="e.g., GateA"><br>
+
+    <!-- Submit to blockchain -->
+    <button onclick="sendScan()">Submit</button>
+    <p id="result"></p>
+
+    <script>
+        // Fetch available IDs and populate dropdown, sorted
+        window.addEventListener("DOMContentLoaded", async () => {
+            const resp = await fetch("/api/ids");
+            let ids = await resp.json();
+            ids.sort();
+            const select = document.getElementById("qrSelect");
+            select.innerHTML = '<option value="">-- Select ID --</option>';
+            ids.forEach(id => {
+                const opt = document.createElement("option");
+                opt.value = id;
+                opt.innerText = id;
+                select.appendChild(opt);
+            });
+
+            // When selection changes, update text field, show QR, enable download
+            select.onchange = () => {
+                const id = select.value;
+                const img = document.getElementById("qrImg");
+                const dl = document.getElementById("downloadBtn");
+                if (id) {
+                    document.getElementById("matId").value = id;
+                    img.src = "/static/qr_codes/" + id + ".png";
+                    img.style.display = "block";
+                    dl.href = "/static/qr_codes/" + id + ".png";
+                    dl.download = id + ".png";
+                    dl.style.display = "inline-block";
+
+                } else {
+                    document.getElementById("matId").value = "";
+                    img.style.display = "none";
+                    dl.style.display = "none";
+                }
+            };
+        });
+
+        // Function to submit scan to the backend
+        async function sendScan() {
+            const id = document.getElementById("matId").value;
+            const location = document.getElementById("loc").value;
+            if (!id) {
+                alert("Please select or enter a Material ID.");
+                return;
+            }
+            const resp = await fetch("/scan", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, location })
+            });
+            const data = await resp.json();
+            document.getElementById("result").innerText =
+                data.status === "success"
+                    ? "Logged TX: " + data.tx_hash
+                    : "Error logging material.";
+        }
+    </script>
+</body>
+</html>
