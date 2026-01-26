@@ -5,18 +5,25 @@ contract MaterialTracker {
     address public owner;
 
     event MaterialScanned(
-        string id,
+        bytes32 indexed materialIdHash,
+        string materialId,
+        string cid,
+        bytes32 payloadHash,
         address indexed scanner,
-        uint256 timestamp,
-        string location
+        uint256 timestamp
     );
 
     constructor() {
         owner = msg.sender;
     }
 
-    function scanMaterial(string memory id, string memory location) public {
+    function scanMaterial(
+        string memory materialId,
+        string memory cid,
+        bytes32 payloadHash
+    ) public {
         require(msg.sender == owner, "Not authorized");
-        emit MaterialScanned(id, msg.sender, block.timestamp, location);
+        bytes32 materialIdHash = keccak256(bytes(materialId));
+        emit MaterialScanned(materialIdHash, materialId, cid, payloadHash, msg.sender, block.timestamp);
     }
 }

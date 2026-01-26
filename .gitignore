@@ -1,4 +1,5 @@
 venv/
 build/
 bin/
-Untitled Document 1
+
+.env

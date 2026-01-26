@@ -1,101 +1,516 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Material Tracker PoC</title>
-    <style>
-        body { font-family: sans-serif; margin: 2rem; }
-        input, select, button { padding: 0.5rem; margin: 0.5rem 0; width: 100%; max-width: 300px; }
-        #result { margin-top: 1rem; font-weight: bold; }
-        #qrImg { width: 200px; display: none; margin-top: 1rem; }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Material Tracker PoC — Blockchain + IPFS</title>
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <h1>Material Tracker PoC</h1>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">
+        <h1>Material Tracker PoC</h1>
+        <p>
+          Gateway (Flask) anchors scan events on-chain and stores full payloads on IPFS.<br/>
+          Demo endpoints: <code>/scan</code>, <code>/history</code> (query), <code>/api/ids</code>.
+        </p>
+      </div>
+      <div class="status">
+        <div class="pill" id="svc-pill"><span class="dot" id="svc-dot"></span><span id="svc-text">Checking services…</span></div>
+        <div class="split">
+          <span class="chip">RPC: <code>127.0.0.1:8545</code></span>
+          <span class="chip">IPFS API: <code>127.0.0.1:5001</code></span>
+          <span class="chip">Gateway: <code>127.0.0.1:8080</code></span>
+        </div>
+      </div>
+    </div>
 
-    <!-- Dropdown of IDs -->
-    <label for="qrSelect">Select Material ID:</label><br>
-    <select id="qrSelect"></select><br>
+    <div class="tabs">
+      <div class="tab active" id="tab-scan" onclick="showTab('scan')">1) Scan -> IPFS + Blockchain</div>
+      <div class="tab" id="tab-history" onclick="showTab('history')">2) Query History (On-chain -> IPFS)</div>
+    </div>
 
-    <!-- QR image display -->
-    <img id="qrImg" src="" alt="QR code">
+    <div class="grid">
+      <!-- Left: Forms -->
+      <div class="card" id="panel-scan">
+        <h2>Scan & Anchor</h2>
+        <div class="hint">
+          Select a Material ID (or type manually), provide a location, and submit. The backend will:
+          (i) store the JSON on IPFS (CID), (ii) compute <code>keccak256(payload)</code>, (iii) emit an on-chain event with <code>(materialId, cid, payloadHash)</code>. The payload also includes <code>logisticStage</code> validated off-chain (ZKP hook).
+        </div>
 
-    <!-- Download button -->
-    <!-- <button id="downloadBtn" style="display:none;">Download QR Code</button> -->
-    <a id="downloadBtn" href="#" download style="
-        display:none;
-        padding:0.5rem; margin:0.5rem 0;
-        background:#007bff; color:#fff; text-decoration:none;
-        border-radius:4px;
-    ">Download QR Code</a><br>
+        <div class="form" style="margin-top:12px;">
+          <div class="row two">
+            <div>
+              <label for="qrSelect">Material ID (dropdown)</label>
+              <select id="qrSelect"></select>
+            </div>
+            <div>
+              <label for="matId">Material ID (manual)</label>
+              <input type="text" id="matId" placeholder="e.g., MAT-001" />
+            </div>
+            <div>
+              <label for="stage">Logistic Stage</label>
+              <select id="stage">
+                <option value="RECEIVING">RECEIVING</option>
+                <option value="QUALITY_CHECK">QUALITY_CHECK</option>
+                <option value="INTERNAL_STORAGE">INTERNAL_STORAGE</option>
+                <option value="ASSEMBLY_LINE">ASSEMBLY_LINE</option>
+                <option value="PACKAGING">PACKAGING</option>
+                <option value="SHIPPING">SHIPPING</option>
+              </select>
+            </div>
+            <div>
+              <label for="loc">Location</label>
+              <input type="text" id="loc" placeholder="e.g., Warehouse A / Gate A" />
+            </div>
+          </div>
 
+          <div class="row one">
+            <div>
+              <label>Actions</label>
+              <button onclick="sendScan()">Submit scan</button>
+            </div>
+          </div>
 
-    <!-- Manual entry fallback -->
-    <label for="matId">Or enter Material ID manually:</label><br>
-    <input type="text" id="matId" placeholder="e.g., MAT-001"><br>
+          <div class="msg" id="scanMsg">Waiting for input…</div>
 
-    <label for="loc">Location:</label><br>
-    <input type="text" id="loc" placeholder="e.g., GateA"><br>
+          <div class="kvs" id="scanResult" style="display:none;">
+            <div class="kv"><span class="k">TX Hash</span><span class="v"><code id="txHash"></code></span></div>
+            <div class="kv"><span class="k">CID</span><span class="v"><a id="cidLink" target="_blank" rel="noreferrer"><code id="cidText"></code></a></span></div>
+            <div class="kv"><span class="k">Logistic Stage</span><span class="v"><code id="stageText"></code></span></div>
+            <div class="kv"><span class="k">Payload Hash (keccak)</span><span class="v"><code id="phash"></code></span></div>
+          </div>
 
-    <!-- Submit to blockchain -->
-    <button onclick="sendScan()">Submit</button>
-    <p id="result"></p>
+          <div class="hint" style="margin-top:6px;">
+            Tip: after submitting, switch to <b>Query History</b> to show full traceability.
+          </div>
+        </div>
+      </div>
 
-    <script>
-        // Fetch available IDs and populate dropdown, sorted
-        window.addEventListener("DOMContentLoaded", async () => {
-            const resp = await fetch("/api/ids");
-            let ids = await resp.json();
-            ids.sort();
-            const select = document.getElementById("qrSelect");
-            select.innerHTML = '<option value="">-- Select ID --</option>';
-            ids.forEach(id => {
-                const opt = document.createElement("option");
-                opt.value = id;
-                opt.innerText = id;
-                select.appendChild(opt);
-            });
+      <div class="card" id="panel-history" style="display:none;">
+        <h2>Query History</h2>
+        <div class="hint">
+          Fetch events from the blockchain and (optionally) retrieve payload JSON from the IPFS gateway.
+          Use the indexed <code>id</code> filter for fast queries.
+        </div>
 
-            // When selection changes, update text field, show QR, enable download
-            select.onchange = () => {
-                const id = select.value;
-                const img = document.getElementById("qrImg");
-                const dl = document.getElementById("downloadBtn");
-                if (id) {
-                    document.getElementById("matId").value = id;
-                    img.src = "/static/qr_codes/" + id + ".png";
-                    img.style.display = "block";
-                    dl.href = "/static/qr_codes/" + id + ".png";
-                    dl.download = id + ".png";
-                    dl.style.display = "inline-block";
+        <div class="form" style="margin-top:12px;">
+          <div class="row two">
+            <div>
+              <label for="histId">Filter by Material ID (optional)</label>
+              <input type="text" id="histId" placeholder="leave empty to fetch all" />
+            </div>
+            <div>
+              <label for="includePayload">Include IPFS payload</label>
+              <select id="includePayload">
+                <option value="true" selected>true (fetch JSON)</option>
+                <option value="false">false (events only)</option>
+              </select>
+            </div>
+          </div>
 
-                } else {
-                    document.getElementById("matId").value = "";
-                    img.style.display = "none";
-                    dl.style.display = "none";
-                }
-            };
+          <div class="row two">
+            <div>
+              <label for="fromBlock">From block</label>
+              <input type="number" id="fromBlock" value="0" min="0"/>
+            </div>
+            <div>
+              <label>Actions</label>
+              <div class="row two" style="grid-template-columns:1fr 1fr;">
+                <button onclick="loadHistory()">Load history</button>
+                <button class="secondary" onclick="fillFromLastScan()">Use last scan ID</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="msg" id="histMsg">No query yet.</div>
+
+          <div class="tablewrap" id="histTableWrap" style="display:none;">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>ID</th>
+                  <th>Block</th>
+                  <th>Timestamp</th>
+                  <th>Stage</th>
+                  <th>CID</th>
+                  <th>Payload Hash</th>
+                  <th>Payload (IPFS)</th>
+                </tr>
+              </thead>
+              <tbody id="histBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: QR preview + help -->
+      <div class="card">
+        <h2>QR Preview</h2>
+        <div class="hint">This is only an input helper. We can store QR metadata later if needed.</div>
+        <img id="qrImg" src="" alt="QR code" style="width:220px; display:none; margin-top:12px; border-radius:12px; border:1px solid var(--border);" />
+        <div style="margin-top:12px;">
+          <a id="downloadBtn" href="#" download style="
+              display:none;
+              padding:10px 12px;
+              background:rgba(90,167,255,.18);
+              border:1px solid rgba(90,167,255,.35);
+              color:var(--text);
+              border-radius:12px;
+              font-weight:600;
+          ">Download QR Code</a>
+        </div>
+
+        <div class="msg" style="margin-top:14px;">
+          <b>Demo flow:</b><br/>
+          1) Submit scan -> show TX + CID<br/>
+          2) Open CID on IPFS gateway<br/>
+          3) Query history -> show on-chain events + IPFS payloads
+        </div>
+
+        <div class="msg" style="margin-top:10px;">
+          <span class="small">
+            Endpoints:
+            <code>/scan</code> (POST),
+            <code>/history</code> (GET with query),
+            <code>/api/ids</code> (GET)
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Payload Side Panel -->
+  <div class="overlay" id="spOverlay" onclick="closePanel()"></div>
+
+  <div class="sidepanel" id="spPanel" aria-hidden="true">
+    <div class="sp-head">
+      <div class="sp-title">
+        <b>Payload Viewer</b>
+        <span id="spSubtitle">Select an event…</span>
+      </div>
+      <button class="sp-close" onclick="closePanel()">✕</button>
+    </div>
+
+    <div class="sp-body">
+    <button class="btn-mini" id="spVerifyBtn" type="button" style="margin-bottom:10px;">Verify integrity</button>
+    <div class="msg" id="spVerifyMsg" style="display:none;"></div>
+
+      <div class="sp-kvs" id="spKvs"></div>
+      <pre class="json" id="spJson">{}</pre>
+    </div>
+  </div>
+
+  <script>
+    let lastScanId = "";
+
+    function showTab(which){
+      const scanTab = document.getElementById("tab-scan");
+      const histTab = document.getElementById("tab-history");
+      const scanPanel = document.getElementById("panel-scan");
+      const histPanel = document.getElementById("panel-history");
+      if(which === "scan"){
+        scanTab.classList.add("active");
+        histTab.classList.remove("active");
+        scanPanel.style.display = "block";
+        histPanel.style.display = "none";
+      } else {
+        histTab.classList.add("active");
+        scanTab.classList.remove("active");
+        histPanel.style.display = "block";
+        scanPanel.style.display = "none";
+      }
+    }
+
+    function tsToLocal(ts){
+      try{
+        const d = new Date(Number(ts) * 1000);
+        return d.toLocaleString();
+      }catch(e){
+        return String(ts);
+      }
+    }
+
+    async function checkServices(){
+      const dot = document.getElementById("svc-dot");
+      const txt = document.getElementById("svc-text");
+      try{
+        // lightweight call: list ids
+        const r = await fetch("/api/ids");
+        if(!r.ok) throw new Error("Gateway not responding");
+        dot.classList.add("ok");
+        txt.textContent = "Gateway OK (Flask)";
+      } catch (e){
+        dot.classList.add("bad");
+        txt.textContent = "Gateway not reachable";
+      }
+    }
+
+    async function loadIds(){
+      const resp = await fetch("/api/ids");
+      let ids = await resp.json();
+      ids.sort();
+      const select = document.getElementById("qrSelect");
+      select.innerHTML = '<option value="">-- Select ID --</option>';
+      ids.forEach(id => {
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.innerText = id;
+        select.appendChild(opt);
+      });
+
+      select.onchange = () => {
+        const id = select.value;
+        const img = document.getElementById("qrImg");
+        const dl = document.getElementById("downloadBtn");
+        if (id) {
+          document.getElementById("matId").value = id;
+          img.src = "/static/qr_codes/" + id + ".png";
+          img.style.display = "block";
+          dl.href = "/static/qr_codes/" + id + ".png";
+          dl.download = id + ".png";
+          dl.style.display = "inline-block";
+        } else {
+          document.getElementById("matId").value = "";
+          img.style.display = "none";
+          dl.style.display = "none";
+        }
+      };
+    }
+
+    
+
+async function loadStages(){
+  const sel = document.getElementById("stage");
+  if(!sel) return;
+  try{
+    const r = await fetch("/api/stages");
+    const stages = await r.json();
+    sel.innerHTML = "";
+    stages.forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s;
+      opt.textContent = s;
+      sel.appendChild(opt);
+    });
+  }catch(e){
+    sel.innerHTML = '<option value="RECEIVING">RECEIVING</option>';
+  }
+}
+function setScanMsg(kind, text){
+      const el = document.getElementById("scanMsg");
+      el.className = "msg " + (kind || "");
+      el.textContent = text;
+    }
+
+    function setHistMsg(kind, text){
+      const el = document.getElementById("histMsg");
+      el.className = "msg " + (kind || "");
+      el.textContent = text;
+    }
+
+    async function sendScan() {
+      const id = document.getElementById("matId").value.trim();
+      const location = document.getElementById("loc").value.trim();
+      if (!id) {
+        setScanMsg("bad", "Please select or enter a Material ID.");
+        return;
+      }
+      setScanMsg("", "Submitting scan…");
+      document.getElementById("scanResult").style.display = "none";
+
+      try{
+        const resp = await fetch("/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ materialId: id, location, logisticStage: document.getElementById("stage")?.value || "RECEIVING" })
         });
 
-        // Function to submit scan to the backend
-        async function sendScan() {
-            const id = document.getElementById("matId").value;
-            const location = document.getElementById("loc").value;
-            if (!id) {
-                alert("Please select or enter a Material ID.");
-                return;
-            }
-            const resp = await fetch("/scan", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id, location })
-            });
-            const data = await resp.json();
-            document.getElementById("result").innerText =
-                data.status === "success"
-                    ? "Logged TX: " + data.tx_hash
-                    : "Error logging material.";
+        const data = await resp.json();
+        if (!resp.ok || data.status !== "success"){
+          setScanMsg("bad", data.error ? ("Error: " + data.error) : "Error logging material.");
+          return;
         }
-    </script>
+
+        lastScanId = id;
+
+        document.getElementById("txHash").textContent = data.tx_hash;
+        document.getElementById("cidText").textContent = data.cid;
+        document.getElementById("phash").textContent = data.payload_hash;
+        document.getElementById("stageText").textContent = data.logisticStage || "";
+
+        const ipfsUrl = "http://127.0.0.1:8080/ipfs/" + data.cid;
+        const a = document.getElementById("cidLink");
+        a.href = ipfsUrl;
+
+        document.getElementById("scanResult").style.display = "grid";
+        setScanMsg("ok", "Scan anchored successfully. Open the CID to view the JSON payload on IPFS.");
+      }catch(e){
+        setScanMsg("bad", "Request failed: " + e.message);
+      }
+    }
+
+    function fillFromLastScan(){
+      const el = document.getElementById("histId");
+      if(lastScanId){
+        el.value = lastScanId;
+        setHistMsg("", "Filled filter with last scan ID: " + lastScanId);
+      } else {
+        setHistMsg("bad", "No scan submitted yet.");
+      }
+    }
+
+
+function setVerifyMsg(kind, text){
+  const el = document.getElementById("spVerifyMsg");
+  if(!el) return;
+  el.style.display = "block";
+  el.className = "msg " + (kind || "");
+  el.textContent = text;
+}
+
+async function verifyCurrentEvent(eventObj){
+  if(!eventObj) return;
+  setVerifyMsg("", "Verifying…");
+  const params = new URLSearchParams();
+  if(eventObj.tx_hash) params.set("tx_hash", eventObj.tx_hash);
+  else if(eventObj.materialId || eventObj.id) params.set("materialId", eventObj.materialId || eventObj.id);
+  if(eventObj.cid) params.set("cid", eventObj.cid);
+  params.set("include_payload", "false");
+  try{
+    const r = await fetch("/verify?" + params.toString());
+    const data = await r.json();
+    if(!r.ok || data.status !== "success"){
+      setVerifyMsg("bad", "Verify failed: " + (data.message || data.error || "unknown error"));
+      return;
+    }
+    if(data.verified){
+      setVerifyMsg("ok", "Integrity OK: payload hash matches on-chain anchor.");
+    } else {
+      setVerifyMsg("bad", "Integrity FAIL: payload does not match on-chain anchor.");
+    }
+  }catch(e){
+    setVerifyMsg("bad", "Verify request failed: " + e.message);
+  }
+}
+function openPanel(eventObj){
+      const overlay = document.getElementById("spOverlay");
+      const panel = document.getElementById("spPanel");
+      const kvs = document.getElementById("spKvs");
+      const json = document.getElementById("spJson");
+      const subtitle = document.getElementById("spSubtitle");
+
+      const mat = eventObj.materialId || eventObj.id || "(unknown)";
+      subtitle.textContent = `Material: ${mat}`;
+
+      const cid = eventObj.cid || "";
+      const cidUrl = cid ? ("http://127.0.0.1:8080/ipfs/" + cid) : "";
+      const tx = eventObj.tx_hash || "";
+      const ph = eventObj.payload_hash || "";
+      const block = eventObj.block_number ?? "";
+      const ts = eventObj.timestamp ? tsToLocal(eventObj.timestamp) : "";
+      const scanner = eventObj.scanner || "—";
+
+      kvs.innerHTML = `
+        <div class="sp-kv"><span class="sp-k">Material ID</span><span class="sp-v"><code>${mat}</code></span></div>
+        <div class="sp-kv"><span class="sp-k">Block</span><span class="sp-v"><code>${block}</code></span></div>
+        <div class="sp-kv"><span class="sp-k">Timestamp</span><span class="sp-v"><code>${ts}</code></span></div>
+        <div class="sp-kv"><span class="sp-k">Scanner</span><span class="sp-v"><code>${scanner}</code></span></div>
+        <div class="sp-kv"><span class="sp-k">CID</span><span class="sp-v">${
+          cid ? `<a href="${cidUrl}" target="_blank" rel="noreferrer"><code>${cid}</code></a>` : `<span class="small">—</span>`
+        }</span></div>
+        <div class="sp-kv"><span class="sp-k">Payload hash</span><span class="sp-v"><code>${ph}</code></span></div>
+        <div class="sp-kv"><span class="sp-k">TX Hash</span><span class="sp-v"><code>${tx}</code></span></div>
+      `;
+
+      json.textContent = eventObj.payload ? JSON.stringify(eventObj.payload, null, 2) : "(no payload fetched)";
+
+  const vb = document.getElementById("spVerifyBtn");
+  if(vb){
+    vb.onclick = () => verifyCurrentEvent(eventObj);
+  }
+  setVerifyMsg("", "Click \"Verify integrity\" to recompute keccak(payload) and compare with the on-chain anchor.");
+
+      overlay.classList.add("show");
+      panel.classList.add("show");
+      panel.setAttribute("aria-hidden", "false");
+    }
+
+    function closePanel(){
+      document.getElementById("spOverlay").classList.remove("show");
+      const panel = document.getElementById("spPanel");
+      panel.classList.remove("show");
+      panel.setAttribute("aria-hidden", "true");
+    }
+
+    async function loadHistory(){
+      const id = document.getElementById("histId").value.trim();
+      const includePayload = document.getElementById("includePayload").value;
+      const fromBlock = document.getElementById("fromBlock").value || "0";
+
+      const params = new URLSearchParams();
+      if(id) params.set("id", id);
+      params.set("include_payload", includePayload);
+      params.set("from_block", fromBlock);
+
+      setHistMsg("", "Loading history…");
+      document.getElementById("histTableWrap").style.display = "none";
+      document.getElementById("histBody").innerHTML = "";
+
+      try{
+        const resp = await fetch("/history?" + params.toString());
+        const data = await resp.json();
+        if(!resp.ok){
+          setHistMsg("bad", "Error: " + (data.error || "failed to fetch history"));
+          return;
+        }
+
+        const events = data.events || [];
+        setHistMsg(events.length ? "ok" : "", `Returned ${events.length} event(s).`);
+
+        const tbody = document.getElementById("histBody");
+        events.forEach((e, idx) => {
+          const tr = document.createElement("tr");
+
+          const mat = e.materialId || e.id || "(unknown)";
+          const cid = e.cid || "";
+          const cidUrl = cid ? ("http://127.0.0.1:8080/ipfs/" + cid) : "#";
+          const ph = e.payload_hash || "";
+
+          tr.innerHTML = `
+            <td>${idx+1}</td>
+            <td><code>${mat}</code></td>
+            <td>${e.block_number ?? ""}</td>
+            <td>${tsToLocal(e.timestamp)}</td>
+            <td><code>${(e.payload && (e.payload.logisticStage || e.payload.stage)) || e.logisticStage || ''}</code></td>
+            <td class="tight">
+              ${cid ? `<a href="${cidUrl}" target="_blank" rel="noreferrer"><code class="wrap">${cid}</code></a>` : `<span class="small">—</span>`}
+            </td>
+            <td class="tight"><code class="wrap">${ph}</code></td>
+            <td>
+              <button class="btn-mini" type="button">View payload</button>
+            </td>
+          `;
+
+          // bind click
+          tr.querySelector("button").addEventListener("click", () => openPanel(e));
+
+          tbody.appendChild(tr);
+        });
+
+        document.getElementById("histTableWrap").style.display = "block";
+      }catch(e){
+        setHistMsg("bad", "Request failed: " + e.message);
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      await checkServices();
+      await loadIds();
+      await loadStages();
+    });
+  </script>
 </body>
 </html>

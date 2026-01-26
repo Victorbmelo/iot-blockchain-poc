@@ -1,17 +1,19 @@
-from solcx import compile_source, install_solc
 import json
+import os
 
-# 1) Ensure the exact version of solc you need is installed
+from solcx import compile_source, install_solc
+
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Version of solc
 install_solc("0.8.0")
 
-# 2) Load your Solidity source
-with open("../contracts/MaterialTracker.sol", "r") as f:
+with open(project_root + r"/contracts/MaterialTracker.sol", "r") as f:
     source = f.read()
 
-# 3) Compile the contract source
 compiled_sol = compile_source(
     source,
-    output_values=["abi", "bin"],     # <- explicitly ask for ABI and bytecode
+    output_values=["abi", "bin"],     # <- ask for ABI and bytecode
     solc_version="0.8.0"
 )
 
@@ -21,12 +23,14 @@ contract_id, contract_interface = compiled_sol.popitem()
 abi = contract_interface["abi"]
 bytecode = contract_interface["bin"]
 
-# 4) Save ABI to a JSON file
-with open("../build/contract_abi.json", "w") as f:
-    json.dump(abi, f)
+# Save ABI to a JSON file
+os.makedirs(project_root + r"/build", exist_ok=True)
 
-# 5) Optionally save bytecode somewhere
-with open("../build/contract_bytecode.txt", "w") as f:
+with open(project_root + r"/build/contract_abi.json", "w") as f:
+    json.dump(abi, f, indent=4)
+
+# Optionally save bytecode somewhere
+with open(project_root + r"/build/contract_bytecode.txt", "w") as f:
     f.write(bytecode)
 
 print("Compilation successful. ABI and bytecode have been written.")
