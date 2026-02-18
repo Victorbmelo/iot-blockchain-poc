@@ -1,0 +1,74 @@
+{
+  "generated_at": "2024-11-15T12:00:00+00:00",
+  "filter_applied": {
+    "zone_id": "Z04"
+  },
+  "event_count": 4,
+  "events": [
+    {
+      "event_id": "evt-0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d",
+      "event_type": "ZONE_ENTRY",
+      "ts_event": "2024-11-15T07:00:00+00:00",
+      "ts_ingest": "2024-11-15T07:00:01+00:00",
+      "site_id": "site-torino-01",
+      "zone_id": "Z04",
+      "actor_id": "W001",
+      "severity": "medium",
+      "source": "camera",
+      "payload_hash": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3",
+      "evidence_uri": "",
+      "prev_event_hash": "",
+      "tx_id": "stub-tx-0a1b2c3d4e5f",
+      "recorded_by": "Org1MSP"
+    },
+    {
+      "event_id": "evt-1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e",
+      "event_type": "ZONE_ENTRY",
+      "ts_event": "2024-11-15T07:05:00+00:00",
+      "ts_ingest": "2024-11-15T07:05:01+00:00",
+      "site_id": "site-torino-01",
+      "zone_id": "Z04",
+      "actor_id": "EQ-CRANE-01",
+      "severity": "medium",
+      "source": "gateway",
+      "payload_hash": "b94f6f125c79e3a5ffaa826f584c10d52ada669e6762051b826b55776d05a8a7",
+      "evidence_uri": "",
+      "prev_event_hash": "",
+      "tx_id": "stub-tx-1b2c3d4e5f6a",
+      "recorded_by": "Org1MSP"
+    },
+    {
+      "event_id": "evt-2c3d4e5f6a7b2c3d4e5f6a7b2c3d4e5f",
+      "event_type": "PROXIMITY_ALERT",
+      "ts_event": "2024-11-15T09:15:00+00:00",
+      "ts_ingest": "2024-11-15T09:15:01+00:00",
+      "site_id": "site-torino-01",
+      "zone_id": "Z04",
+      "actor_id": "W001",
+      "severity": "high",
+      "source": "wearable",
+      "payload_hash": "cc8d2c9c1e6836da283e4f527d8b9e6a8d15c9f4e2b7a1d0e9f8c7b6a5d4e3f",
+      "evidence_uri": "",
+      "prev_event_hash": "",
+      "tx_id": "stub-tx-2c3d4e5f6a7b",
+      "recorded_by": "Org1MSP"
+    },
+    {
+      "event_id": "evt-3d4e5f6a7b8c3d4e5f6a7b8c3d4e5f6a",
+      "event_type": "NEAR_MISS",
+      "ts_event": "2024-11-15T09:17:45+00:00",
+      "ts_ingest": "2024-11-15T09:17:46+00:00",
+      "site_id": "site-torino-01",
+      "zone_id": "Z04",
+      "actor_id": "W001",
+      "severity": "high",
+      "source": "camera",
+      "payload_hash": "dd4f8e2a7c1b9d0e5f3a8b6c2d7e1f4a9b3c8d5e0f2a7b4c1d6e3f8a5b2c9d",
+      "evidence_uri": "minio://audit-evidence/2024-11-15/NEAR-MISS-Z04-0917.mp4",
+      "prev_event_hash": "",
+      "tx_id": "stub-tx-3d4e5f6a7b8c",
+      "recorded_by": "Org1MSP"
+    }
+  ],
+  "package_hash": "5e2a1d8c4f7b3e9a6d2c5f8b1e4a7d0c3f6b9e2a5d8c1f4b7e0a3d6c9f2b5e"
+}
