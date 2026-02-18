@@ -2,13 +2,13 @@
 # Start the Audit Layer stack.
 #
 # Modes:
-#   --stub    Start only the gateway with an in-memory ledger (default, no Docker required)
-#   --docker  Start the gateway and MinIO via Docker Compose
-#   --fabric  Start the Hyperledger Fabric test-network, deploy chaincode, and start the gateway
+#   --stub    In-memory ledger, no Docker (default)
+#   --docker  Gateway + MinIO via Docker Compose
+#   --fabric  Fabric test-network + chaincode + gateway
 #
 # Prerequisites for --fabric:
-#   fabric-samples installed at $FABRIC_SAMPLES_DIR (default: ~/fabric-samples)
-#   Run: curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7
+#   fabric-samples at $FABRIC_SAMPLES_DIR (default: ~/fabric-samples)
+#   Install: curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ CHAINCODE_NAME="auditcc"
 
 case "$MODE" in
     --stub)
-        echo "Starting gateway in stub mode (in-memory ledger)"
+        echo "Starting gateway in stub mode"
         cd "$PROJECT_ROOT/gateway"
         FABRIC_STUB_MODE=true uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
         ;;
@@ -33,12 +33,13 @@ case "$MODE" in
         echo "Gateway : http://localhost:8080"
         echo "Docs    : http://localhost:8080/docs"
         echo "MinIO   : http://localhost:9001  (minioadmin / minioadmin)"
+        echo "Dashboard: streamlit run dashboard/app.py"
         ;;
 
     --fabric)
         if [ ! -d "$FABRIC_SAMPLES_DIR" ]; then
             echo "fabric-samples not found at $FABRIC_SAMPLES_DIR"
-            echo "Install with: curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7"
+            echo "Install: curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7"
             exit 1
         fi
 
@@ -46,10 +47,9 @@ case "$MODE" in
         CHAINCODE_SRC="$PROJECT_ROOT/fabric/chaincode/auditcc"
 
         echo "[1/4] Stopping previous network"
-        cd "$NETWORK_DIR"
-        ./network.sh down 2>/dev/null || true
+        cd "$NETWORK_DIR" && ./network.sh down 2>/dev/null || true
 
-        echo "[2/4] Starting network with CouchDB"
+        echo "[2/4] Starting network with CouchDB (required for composite key queries)"
         ./network.sh up createChannel -ca -c "$CHANNEL" -s couchdb
 
         echo "[3/4] Deploying chaincode"

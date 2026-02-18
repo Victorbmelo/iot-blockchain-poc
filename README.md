@@ -4,152 +4,126 @@ Laurea Magistrale — Politecnico di Torino
 
 ## What This System Is
 
-This prototype implements a **multi-stakeholder accountability framework** for construction site safety events. It is not a monitoring system — its purpose is to provide tamper-evident records that are credible to all parties involved in a safety incident, including the party operating the IoT infrastructure.
+This is a multi-stakeholder accountability framework for construction site safety events. Its purpose is to provide tamper-evident records that are credible to all parties — including the party operating the IoT infrastructure.
 
-The system addresses a specific gap in existing safety platforms: event logs controlled by the main contractor can be modified or suppressed after an incident, making them legally unreliable for insurance claims, regulatory investigations, and litigation. This system removes that gap by recording events on a permissioned blockchain where no single organisation can unilaterally alter the record.
+The system addresses a specific gap: safety event logs controlled by the main contractor can be modified or suppressed after an incident, making them legally unreliable for insurance claims, regulatory investigations, and litigation. A permissioned blockchain with multi-party endorsement removes that gap. Neither the contractor nor the inspector can unilaterally alter the record, because both parties' cryptographic signatures are required on every write transaction.
 
-**Core properties:**
-- A submitted event cannot be modified or deleted by any single party
-- Any authorised stakeholder can independently verify any record without trusting the submitter
-- The submitting organisation's identity is permanently attached to each record
-- Multi-party endorsement means neither the contractor nor the inspector can claim the records were fabricated by the other
+See `docs/design-rationale.md` for the formal comparison with append-only databases. See `docs/accountability-framework.md` for the governance model and verification protocol.
 
-For the formal justification of why a permissioned blockchain is necessary rather than a simpler append-only database, see `docs/design-rationale.md`.
-
-## Documentation Map
+## Documentation
 
 | Document | Contents |
 |---|---|
 | `docs/architecture.md` | Component diagram, data model, data flows, chaincode functions |
 | `docs/accountability-framework.md` | Governance model, verification protocol, accountability matrix |
-| `docs/threat-model.md` | Adversary definitions, concrete threat scenarios, residual risks |
-| `docs/design-rationale.md` | Why blockchain; formal comparison with append-only DB + signatures |
-| `docs/legal-use-cases.md` | Concrete forensic/legal scenarios for inspector, insurer, legal counsel |
+| `docs/threat-model.md` | Adversary definitions, concrete threat scenarios (T1–T6), residual risks |
+| `docs/design-rationale.md` | Why blockchain; formal comparison with append-only DB + digital signatures |
+| `docs/legal-use-cases.md` | Step-by-step forensic/legal scenarios for inspector, insurer, legal counsel |
 | `docs/experiment-plan.md` | Validation experiments with acceptance criteria |
-| `docs/api-spec.md` | REST API reference with curl examples |
+| `docs/api-spec.md` | REST API reference |
 
-## Architecture (Summary)
+## Architecture
 
 ```
 IoT Platform / Simulators
-        |  HTTP POST /events
+        |  POST /events
         v
   Audit Gateway (FastAPI, Python)
-  validate -> hash -> submit
+  validate -> canonical hash -> ECDSA sign -> submit
         |  gRPC + mutual TLS
         v
   Hyperledger Fabric 2.5
-  Channel: mychannel
-  Chaincode: auditcc (Go)
   Endorsement: AND(Org1MSP, Org2MSP)
-  State DB: CouchDB
+  Chaincode: auditcc (Go)
+  State DB: CouchDB (composite key indexes)
         |
         v
   MinIO (off-chain evidence store)
-  Full payloads, sensor logs, video evidence
+  Ledger stores: payloadHash + evidenceRef only
 ```
 
-Every write transaction requires endorsement from both the contractor's peer (Org1) and the inspector's peer (Org2). Neither can unilaterally modify the ledger.
+## Key Security Properties
+
+| Property | Mechanism |
+|---|---|
+| Immutability | Fabric append-only ledger; PutState rejects overwrites via idempotency check |
+| Non-repudiation | ECDSA signature on every event; multi-org endorsement on every block |
+| Integrity verification | SHA-256 canonical JSON hash; any party can independently recompute |
+| Identity attribution | `recordedByMSP` + `signerId` + `signerCertFingerprint` on every record |
+| Idempotency | `eventId = SHA256(schemaVersion:actor:ts:type:zone:nonce)` — retry-safe |
+| Chain integrity | `prevEventHash` links events per actor; `TraceChain` detects broken links |
+| Pseudonymisation | `actorId` is a pseudonym; PII kept off-chain |
 
 ## Prerequisites
 
 - Docker and Docker Compose v2+
-- Python 3.11+
+- Python 3.11+ with pip
 - Go 1.21+ (only for Fabric deployment mode)
 - WSL2 (Windows) or Linux / macOS
-- Hyperledger Fabric samples for full Fabric mode:
 
+For full Fabric mode:
 ```bash
 curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7
 ```
 
 ## Quick Start
 
-### Stub Mode (no Docker, no Fabric — fastest)
-
-Uses an in-memory ledger. Sufficient for demonstrating all application logic.
+### Stub mode (no Docker, no Fabric)
 
 ```bash
 make install-dev
-make up-stub
+make up-stub          # gateway at http://localhost:8080
+
+# In a second terminal:
+make seed             # load accident + near-miss + 200 normal events
+make sim-fraud        # tamper detection demo
+make dashboard        # open Streamlit UI
 ```
-
-In a second terminal:
-
-```bash
-make seed          # seed with 500+ events including incident scenario
-make demo-tamper   # tamper detection demo
-make query-stats   # event counts by type, severity, zone
-```
-
-API docs: `http://localhost:8080/docs`
 
 ### Docker Compose
 
 ```bash
 docker compose up --build
-# Gateway: http://localhost:8080
-# MinIO console: http://localhost:9001  (minioadmin / minioadmin)
+streamlit run dashboard/app.py
 ```
 
-### Full Hyperledger Fabric
+### Full Fabric
 
 ```bash
 make up-fabric
 make seed
-make demo-tamper
-make export-report
-make verify-report
+make sim-fraud
 ```
 
-## Demonstration Scenarios
+## Simulation Scenarios
 
-### Tamper Detection (Key Demo)
+| Command | Scenario | Demonstrates |
+|---|---|---|
+| `make sim-normal` | 200 random events over 7 days | Normal monitoring (UC1) |
+| `make sim-accident` | Entry -> PPE violation -> near-miss -> fall | Incident timeline (UC2) |
+| `make sim-near-miss` | Entry -> hazard -> proximity -> near-miss | Escalating chain |
+| `make sim-fraud` | Submit event, tamper severity, verify -> FAIL | Tamper detection (UC3) |
+| `make sim-replay` | Submit same event twice | Idempotency protection |
+| `make sim-rate` | 10 tx/s for 60s | Throughput measurement (E7) |
 
-Submits an event, then verifies that a modified version of the payload produces a hash mismatch:
+## REST API
 
-```bash
-make demo-tamper
-```
-
-Output:
-
-```
-[3] Verifying original payload (expected: PASS)
-    Result: PASS
-
-[5] Verifying tampered payload (expected: FAIL)
-    Result: FAIL: stored=e3b0c44298fc1c14 computed=ba7816bf8f01cfea
-```
-
-This is the core of the non-repudiation demonstration. Any modification to a stored payload is detectable by any party holding the original data, without contacting the submitter.
-
-### Post-Incident Timeline (UC2)
-
-Loads a pre-built incident day scenario and reconstructs the event timeline:
-
-```bash
-make demo-incident
-
-# Query the incident zone
-curl "http://localhost:8080/events?zone_id=Z04"
-
-# Export incident audit report
-bash scripts/export_audit_report.sh --zone Z04
-```
-
-The incident day scenario (`simulator/scenarios/incident_day.json`) includes ZONE_ENTRY, PPE_VIOLATION, PROXIMITY_ALERT, NEAR_MISS, and FALL_DETECTED events, allowing a full causal chain to be reconstructed from the ledger.
-
-See `docs/legal-use-cases.md` for the step-by-step procedure an inspector, insurer, or lawyer would follow using this output.
-
-### Batch Integrity Verification
-
-```bash
-make export-report
-make verify-report
-```
-
-Verifies every event in the exported report by recomputing its hash and comparing it against the ledger. Produces a PASS/FAIL result per event and a summary.
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Status, stub mode, schema version, signer ID |
+| `/pubkey` | GET | Gateway public key PEM for signature verification |
+| `/stats` | GET | Event counts by type, severity, zone |
+| `/metrics` | GET | Latency (avg, P95, P99), throughput, error rate |
+| `/metrics/export` | POST | Write metrics.csv + events.csv to results/ |
+| `/events` | POST | Submit event — validate, hash, sign, record |
+| `/events/{id}` | GET | Retrieve single event |
+| `/events/{id}/history` | GET | Fabric write history (1 entry = no tampering) |
+| `/events/{id}/chain` | GET | Trace prevEventHash chain backward |
+| `/actors/{id}/events` | GET | Paginated actor event history |
+| `/zones/{id}/events` | GET | Paginated zone event history |
+| `/near-misses` | GET | All NEAR_MISS events (paginated) |
+| `/verify` | POST | Verify payload hash + validate signature |
+| `/audit/report` | GET | Tamper-evident audit package (hash + events) |
 
 ## Project Structure
 
@@ -169,66 +143,69 @@ audit-layer/
 ├── fabric/
 │   └── chaincode/
 │       └── auditcc/
-│           ├── auditcc.go
+│           ├── auditcc.go       -- composite keys, ACL, pagination, TraceChain
 │           └── go.mod
 ├── gateway/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── app/
-│       ├── main.py
-│       ├── schemas.py
-│       ├── fabric_client.py
-│       └── hashing.py
+│       ├── main.py              -- all endpoints + metrics instrumentation
+│       ├── schemas.py           -- SafetyEvent schema v1.0
+│       ├── fabric_client.py     -- Fabric SDK wrapper + stub
+│       ├── hashing.py           -- canonical JSON + SHA-256
+│       ├── signing.py           -- ECDSA signing + verification
+│       └── metrics.py           -- latency/throughput collection + CSV export
+├── dashboard/
+│   ├── app.py                   -- Streamlit UI: timeline, verify, metrics, tamper button
+│   └── requirements.txt
 ├── simulator/
-│   ├── generate_events.py
+│   ├── generate_events.py       -- 5 scenarios: normal/near_miss/accident/fraud/replay
 │   └── scenarios/
 │       └── incident_day.json
+├── tests/
+│   ├── test_hashing.py
+│   └── test_signing.py
 ├── scripts/
-│   ├── up.sh
-│   ├── down.sh
-│   ├── seed.sh
+│   ├── up.sh / down.sh / seed.sh
 │   ├── export_audit_report.sh
 │   └── verify_integrity.py
-└── results/
-    └── sample_report.json
+└── results/                     -- auto-created by metrics export
+    └── run_YYYYMMDD_HHMM/
+        ├── events.csv
+        └── metrics.csv
 ```
 
-## REST API
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Health check |
-| `/stats` | GET | Event counts by type, severity, zone |
-| `/events` | POST | Submit a new safety event |
-| `/events` | GET | Query events (actor, zone, type, severity, time range) |
-| `/events/{id}` | GET | Retrieve a single event |
-| `/events/{id}/history` | GET | Fabric write history — confirms single write |
-| `/events/{id}/verify` | POST | Verify payload hash: returns PASS or FAIL |
-| `/audit/report` | GET | Export full audit report as JSON |
-| `/audit/package` | GET | Chaincode-level bundle with package hash |
-
-## Mapping to Thesis Chapters
+## Thesis Chapter Mapping
 
 | Chapter | Topic | Primary Artefacts |
 |---|---|---|
-| Chapter 2 | Background: IoT safety, permissioned blockchain | docs/design-rationale.md, docs/threat-model.md |
-| Chapter 3 | System design | docs/architecture.md, docs/accountability-framework.md |
-| Chapter 4 | Implementation | gateway/, fabric/chaincode/, simulator/ |
-| Chapter 5 | Experiments and validation | docs/experiment-plan.md, docs/legal-use-cases.md, results/ |
+| 2 | Background | docs/design-rationale.md, docs/threat-model.md |
+| 3 | System design | docs/architecture.md, docs/accountability-framework.md |
+| 4 | Implementation | gateway/, fabric/chaincode/, simulator/, dashboard/ |
+| 5 | Evaluation | docs/experiment-plan.md, docs/legal-use-cases.md, results/ |
+
+## Answering the Banca's Key Question
+
+> "Why not use an append-only database with digital signatures?"
+
+Short answer: Because the entity that controls the database (the main contractor) is the primary accountability subject. A database with a single administrator can be modified by that administrator, regardless of append-only constraints at the application layer. A Fabric ledger with `AND(Org1MSP, Org2MSP)` endorsement cannot be modified by either organisation acting alone — including the one who deployed it.
+
+Full answer with formal comparison: `docs/design-rationale.md`.
 
 ## Limitations
 
-- Events are generated by the simulator, not by real IoT sensors.
-- Stub mode does not exercise real Fabric consensus or endorsement policy.
-- Throughput at scale is not benchmarked — performance analysis is out of scope.
-- Chaincode-level attribute-based access control (ABAC) is documented but not implemented in this prototype.
-- `evidence_uri` and MinIO integration are optional in the prototype; the hash verification path is fully implemented.
+- Events are simulated, not from real IoT sensors
+- Stub mode does not exercise Fabric consensus or endorsement policy
+- Throughput not benchmarked against large-scale production workloads
+- ABAC at chaincode level is documented but not fully implemented (MSP-level ACL is)
+- MinIO integration uses optional `evidenceRef` — hash verification path is complete
 
 ## References
 
 - Hyperledger Fabric 2.5: https://hyperledger-fabric.readthedocs.io
 - Fabric Gateway SDK: https://hyperledger.github.io/fabric-gateway
 - ISO 45001:2018 — Occupational health and safety management systems
-- ISO/IEC 27037 — Guidelines for digital evidence identification and preservation
-- EU OSH Framework Directive 89/391/EEC
+- ISO/IEC 27037 — Digital evidence identification and preservation
+- EU OSH Directive 89/391/EEC
 - FastAPI: https://fastapi.tiangolo.com
+- Streamlit: https://streamlit.io

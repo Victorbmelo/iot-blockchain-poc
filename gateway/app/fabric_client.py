@@ -33,8 +33,7 @@ class FabricClient:
     """Wraps Hyperledger Fabric Gateway calls for the audit layer.
 
     Falls back to an in-memory stub when FABRIC_STUB_MODE=true or when
-    the Fabric SDK is not installed, allowing local development without
-    a running Fabric network.
+    the Fabric SDK is not installed.
     """
 
     def __init__(self):
@@ -60,20 +59,23 @@ class FabricClient:
         gateway = connect(channel, signer_credentials=(gw_cert, gw_key))
         network = gateway.get_network(CHANNEL_NAME)
         self._contract = network.get_contract(CHAINCODE_NAME)
-        log.info("connected to Fabric peer=%s channel=%s chaincode=%s", PEER_ENDPOINT, CHANNEL_NAME, CHAINCODE_NAME)
+        log.info("connected to Fabric peer=%s channel=%s chaincode=%s",
+                 PEER_ENDPOINT, CHANNEL_NAME, CHAINCODE_NAME)
 
     def register_event(
         self,
-        event_id: str, event_type: str, ts_event: str,
-        site_id: str, zone_id: str, actor_id: str,
-        severity: str, source: str,
-        payload_hash: str, evidence_uri: str, prev_event_hash: str,
+        event_id: str, event_type: str, actor_id: str,
+        site_id: str, zone_id: str, ts: str,
+        severity: int, source: str,
+        payload_hash: str, evidence_ref: str, prev_event_hash: str,
+        signature: str, signer_id: str, signer_cert_fingerprint: str,
     ) -> str:
-        """Submit a RegisterEvent transaction. Returns the transaction ID."""
+        """Submit RegisterEvent transaction. Returns the transaction ID."""
         args = [
-            event_id, event_type, ts_event, site_id, zone_id,
-            actor_id, severity, source, payload_hash,
-            evidence_uri or "", prev_event_hash or "",
+            event_id, event_type, actor_id, site_id, zone_id, ts,
+            str(severity), source, payload_hash,
+            evidence_ref or "", prev_event_hash or "",
+            signature, signer_id, signer_cert_fingerprint,
         ]
         if self._stub:
             return self._stub_register(args)
@@ -89,93 +91,120 @@ class FabricClient:
         result = self._contract.evaluate("QueryEvent", arguments=[event_id])
         return json.loads(result)
 
-    def verify_integrity(self, event_id: str, payload_json: str) -> str:
+    def verify_event(self, event_id: str, payload_hash: str) -> str:
         if self._stub:
-            return self._stub_verify(event_id, payload_json)
-        result = self._contract.evaluate("VerifyIntegrity", arguments=[event_id, payload_json])
+            return self._stub_verify(event_id, payload_hash)
+        result = self._contract.evaluate("VerifyEvent", arguments=[event_id, payload_hash])
         return result.decode("utf-8")
 
-    def query_by_worker(self, actor_id: str) -> list[dict]:
+    def get_events_by_actor(self, actor_id: str, from_ts: str, to_ts: str,
+                            page_size: int = 50, bookmark: str = "") -> dict:
         if self._stub:
-            return [v for v in _stub_store.values() if v.get("actor_id") == actor_id]
-        return self._evaluate_list("QueryByWorker", [actor_id])
+            records = [v for v in _stub_store.values() if v.get("actorId") == actor_id
+                       and from_ts <= v.get("ts", "") <= to_ts]
+            return {"records": [{"key": r["eventId"], "record": r} for r in records],
+                    "fetchedCount": len(records), "bookmark": ""}
+        result = self._contract.evaluate("GetEventsByActor",
+                                         arguments=[actor_id, from_ts, to_ts,
+                                                    str(page_size), bookmark])
+        return json.loads(result)
 
-    def query_by_zone(self, zone_id: str) -> list[dict]:
+    def get_events_by_zone(self, zone_id: str, from_ts: str, to_ts: str,
+                           page_size: int = 50, bookmark: str = "") -> dict:
         if self._stub:
-            return [v for v in _stub_store.values() if v.get("zone_id") == zone_id]
-        return self._evaluate_list("QueryByZone", [zone_id])
+            records = [v for v in _stub_store.values() if v.get("zoneId") == zone_id
+                       and from_ts <= v.get("ts", "") <= to_ts]
+            return {"records": [{"key": r["eventId"], "record": r} for r in records],
+                    "fetchedCount": len(records), "bookmark": ""}
+        result = self._contract.evaluate("GetEventsByZone",
+                                         arguments=[zone_id, from_ts, to_ts,
+                                                    str(page_size), bookmark])
+        return json.loads(result)
 
-    def query_by_event_type(self, event_type: str) -> list[dict]:
+    def get_events_by_type(self, event_type: str, from_ts: str, to_ts: str,
+                           page_size: int = 50, bookmark: str = "") -> dict:
         if self._stub:
-            return [v for v in _stub_store.values() if v.get("event_type") == event_type]
-        return self._evaluate_list("QueryByEventType", [event_type])
+            records = [v for v in _stub_store.values() if v.get("eventType") == event_type
+                       and from_ts <= v.get("ts", "") <= to_ts]
+            return {"records": [{"key": r["eventId"], "record": r} for r in records],
+                    "fetchedCount": len(records), "bookmark": ""}
+        result = self._contract.evaluate("GetEventsByType",
+                                         arguments=[event_type, from_ts, to_ts,
+                                                    str(page_size), bookmark])
+        return json.loads(result)
 
-    def query_by_severity(self, severity: str) -> list[dict]:
+    def get_near_misses(self, from_ts: str, to_ts: str,
+                        page_size: int = 50, bookmark: str = "") -> dict:
+        return self.get_events_by_type("NEAR_MISS", from_ts, to_ts, page_size, bookmark)
+
+    def trace_chain(self, event_id: str) -> list:
         if self._stub:
-            return [v for v in _stub_store.values() if v.get("severity") == severity]
-        return self._evaluate_list("QueryBySeverity", [severity])
+            return [{"note": "chain tracing requires Fabric mode"}]
+        result = self._contract.evaluate("TraceChain", arguments=[event_id])
+        return json.loads(result) or []
 
-    def query_by_time_range(self, start_ts: str, end_ts: str) -> list[dict]:
-        if self._stub:
-            return [v for v in _stub_store.values() if start_ts <= v.get("ts_event", "") <= end_ts]
-        return self._evaluate_list("QueryByTimeRange", [start_ts, end_ts])
-
-    def get_audit_package(self, filter_type: str, filter_value: str) -> dict:
+    def get_audit_package(self, filter_type: str, filter_value: str,
+                          from_ts: str = "2000-01-01T00:00:00Z",
+                          to_ts: str = "2099-12-31T23:59:59Z") -> dict:
         if self._stub:
             events = list(_stub_store.values())
             pkg_hash = hashlib.sha256(
                 json.dumps(events, sort_keys=True).encode()
             ).hexdigest()
             return {
-                "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "filter": f"{filter_type}={filter_value}",
-                "event_count": len(events),
+                "eventCount": len(events),
                 "events": events,
-                "package_hash": pkg_hash,
+                "packageHash": pkg_hash,
             }
-        result = self._contract.evaluate("GetAuditPackage", arguments=[filter_type, filter_value])
+        result = self._contract.evaluate("GetAuditPackage",
+                                         arguments=[filter_type, filter_value, from_ts, to_ts])
         return json.loads(result)
 
-    def get_history(self, event_id: str) -> list[dict]:
+    def get_history(self, event_id: str) -> list:
         if self._stub:
             return [{"note": "history not available in stub mode"}]
         result = self._contract.evaluate("GetHistory", arguments=[event_id])
         return json.loads(result) or []
 
-    def _evaluate_list(self, function_name: str, args: list[str]) -> list[dict]:
-        result = self._contract.evaluate(function_name, arguments=args)
-        return json.loads(result) or []
+    def query_all(self) -> list[dict]:
+        """Return all events from the stub store (stub mode only)."""
+        return list(_stub_store.values())
 
     def _stub_register(self, args: list[str]) -> str:
         event_id = args[0]
         tx_id = f"stub-tx-{hashlib.md5(event_id.encode()).hexdigest()[:12]}"
         _stub_store[event_id] = {
-            "event_id": args[0],
-            "event_type": args[1],
-            "ts_event": args[2],
-            "site_id": args[3],
-            "zone_id": args[4],
-            "actor_id": args[5],
-            "severity": args[6],
+            "schemaVersion": "1.0",
+            "eventId": args[0],
+            "eventType": args[1],
+            "actorId": args[2],
+            "siteId": args[3],
+            "zoneId": args[4],
+            "ts": args[5],
+            "tsLedger": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "severity": int(args[6]),
             "source": args[7],
-            "payload_hash": args[8],
-            "evidence_uri": args[9],
-            "prev_event_hash": args[10],
-            "tx_id": tx_id,
-            "ts_ingest": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "recorded_by": "Org1MSP",
+            "payloadHash": args[8],
+            "evidenceRef": args[9],
+            "prevEventHash": args[10],
+            "signature": args[11],
+            "signerId": args[12],
+            "signerCertFingerprint": args[13],
+            "recordedByMSP": "Org1MSP",
+            "txId": tx_id,
         }
         return tx_id
 
-    def _stub_verify(self, event_id: str, payload_json: str) -> str:
+    def _stub_verify(self, event_id: str, payload_hash: str) -> str:
         record = _stub_store.get(event_id)
         if not record:
             raise ValueError(f"event {event_id} not found")
-        stored_hash = record["payload_hash"]
-        computed = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-        if computed == stored_hash:
+        stored = record["payloadHash"]
+        if payload_hash == stored:
             return "PASS"
-        return f"FAIL: stored={stored_hash} computed={computed}"
+        return f"FAIL: stored={stored} submitted={payload_hash}"
 
 
 _client: FabricClient | None = None
