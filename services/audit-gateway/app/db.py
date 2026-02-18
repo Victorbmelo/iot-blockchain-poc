@@ -46,7 +46,6 @@ async def close_pool():
         _pool = None
 
 
-#  Schema 
 
 CREATE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -95,7 +94,6 @@ async def init_db():
     log.info("database schema initialised")
 
 
-#  Hashing 
 
 SCHEMA_VERSION = "1.0"
 
@@ -167,7 +165,6 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-#  Events 
 
 async def insert_event(event: dict) -> dict:
     """Validate, hash, and insert a new event. Returns the stored record."""
@@ -322,7 +319,6 @@ async def mark_events_failed(batch_id: str):
         )
 
 
-#  Batches 
 
 async def insert_batch(batch: dict) -> dict:
     pool = await get_pool()

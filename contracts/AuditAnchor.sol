@@ -11,15 +11,15 @@ pragma solidity ^0.8.19;
  * here. Individual events remain in PostgreSQL; this contract is the tamper-evident
  * witness proving they have not been modified since the anchor was stored.
  *
- * On-chain per batch (≈ 200 bytes):
+ * On-chain per batch (~ 200 bytes):
  *   merkleRoot  - root of SHA-256 event hashes
  *   metaHash    - hash of {batchId, windowStart, windowEnd, eventCount, siteId}
  *   blockTs     - block.timestamp (EVM-set, cannot be forged by caller)
  *   submitter   - gateway address (accountability)
  *
  * Threat mitigations addressed:
- *   T1 delete event    - hash absent from Merkle tree → verify FAIL
- *   T2 tamper payload  - SHA-256 mismatch → verify FAIL
+ *   T1 delete event    - hash absent from Merkle tree -> verify FAIL
+ *   T2 tamper payload  - SHA-256 mismatch -> verify FAIL
  *   T3 insert fake     - Merkle proof rejects extra leaf
  *   T4 reorder batch   - window bounds in metaHash are immutable
  *   T5 replay          - batchId write-once (second store reverts)

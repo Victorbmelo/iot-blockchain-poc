@@ -42,7 +42,6 @@ async def anchor_batch(batch_id: str, merkle_root: str, meta_hash: str) -> Ancho
         return await _stub_anchor(batch_id, merkle_root, meta_hash)
 
 
-#  Stub backend 
 
 _stub_store: dict[str, dict] = {}
 _stub_counter = 0

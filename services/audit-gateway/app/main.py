@@ -2,7 +2,7 @@
 main.py - Audit Gateway REST API.
 
 Architecture position: this process sits between the IoT simulators and the ledger.
-  IoT → POST /events → validate → store in Postgres → batch worker → anchor on Besu
+  IoT -> POST /events -> validate -> store in Postgres -> batch worker -> anchor on Besu
 
 Role enforcement: all mutating endpoints require OPERATOR role.
 All read/verify endpoints require INSPECTOR or INSURER.
@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .db import (
     get_batch, get_batch_events, get_batches, get_event, get_events,
@@ -32,7 +33,7 @@ app = FastAPI(
     title="Audit Gateway",
     description=(
         "Immutable audit layer for construction site safety data.\n\n"
-        "**Flow**: IoT events → Postgres → Merkle batch → Besu anchor\n\n"
+        "**Flow**: IoT events -> Postgres -> Merkle batch -> Besu anchor\n\n"
         "**Roles** (X-Role header): `operator` | `safety_manager` | `inspector` | `insurer`\n\n"
         "Thesis: *Immutable Audit Layer for IoT Safety Data* - Politecnico di Torino"
     ),
@@ -42,7 +43,10 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
-#  Startup / Shutdown 
+# Minimal static UI to make the system tangible during demos/defense.
+# Served at /ui (no extra service required).
+app.mount("/ui", StaticFiles(directory="app/static", html=True), name="ui")
+
 
 @app.on_event("startup")
 async def startup():
@@ -68,7 +72,6 @@ async def shutdown():
     await close_pool()
 
 
-#  System endpoints 
 
 @app.get("/health", tags=["system"])
 async def health():
@@ -91,7 +94,6 @@ async def stats():
     return await get_stats()
 
 
-#  Event ingestion - OPERATOR only 
 
 @app.post("/events", tags=["events"], status_code=201)
 async def submit_event(
@@ -115,7 +117,6 @@ async def submit_event(
     return {**stored, "_latency_ms": latency_ms}
 
 
-#  Event queries 
 
 @app.get("/events", tags=["events"],
          dependencies=[Depends(require("read_events"))])
@@ -139,7 +140,6 @@ async def get_event_by_id(event_id: str):
     return ev
 
 
-#  Batch queries 
 
 @app.get("/batches", tags=["batches"],
          dependencies=[Depends(require("read_batches"))])
@@ -167,7 +167,6 @@ async def get_events_in_batch(batch_id: str):
     return await get_batch_events(batch_id)
 
 
-#  Force batch close (for experiments and demo) 
 
 @app.post("/batches/close", tags=["batches"], status_code=202,
           dependencies=[Depends(require("submit_event"))])
@@ -179,7 +178,6 @@ async def force_close_batch():
     return {"status": "batch closed"}
 
 
-#  Integrity verification 
 
 @app.get("/verify/batch/{batch_id}", tags=["integrity"],
          response_model=VerifyResult,
@@ -192,7 +190,7 @@ async def verify_batch(batch_id: str):
     2. Recompute SHA-256 hash for each event from stored payload
     3. Rebuild Merkle root from event hashes
     4. Read merkle_root from the ledger (Besu getAnchor)
-    5. Compare: if equal → PASS, else FAIL
+    5. Compare: if equal -> PASS, else FAIL
 
     This answers: "have any events been modified, added, or removed since anchoring?"
     """

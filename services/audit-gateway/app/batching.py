@@ -6,7 +6,7 @@ Runs as an asyncio background task. Every BATCH_WINDOW_SECONDS:
   2. If none, skip
   3. Generate batch_id = "batch-<ts>-<uuid4[:8]>"
   4. Compute SHA-256 event_hash for each (if not already set)
-  5. Build sorted Merkle tree over event_hashes → merkle_root
+  5. Build sorted Merkle tree over event_hashes -> merkle_root
   6. Compute meta_hash = SHA256(canonical batch metadata)
   7. Write batch record to PostgreSQL
   8. Update events with batch_id, status=BATCHED

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Immutable Audit Layer - Demo</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;max-width:1100px}
+    h1{margin:0 0 6px 0;font-size:22px}
+    .muted{color:#555}
+    .row{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+    button{padding:10px 12px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer}
+    button:hover{background:#f6f6f6}
+    input{padding:10px 12px;border:1px solid #ccc;border-radius:10px;min-width:280px}
+    pre{background:#0b1020;color:#e8ecff;padding:14px;border-radius:12px;overflow:auto;max-height:520px}
+    .card{border:1px solid #e3e3e3;border-radius:14px;padding:14px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media (max-width: 920px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <h1>Immutable Audit Layer - Demo UI</h1>
+  <div class="muted">This page calls the Audit Gateway API. Use it to show a concrete workflow (ingest -> batch/anchor -> verify) during your defense.</div>
+
+  <div class="row">
+    <button id="btnScenario">Run sample scenario</button>
+    <button id="btnFlush">Force flush (commit batch)</button>
+    <button id="btnLatest">Fetch latest batches</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Verify a batch</h3>
+      <div class="row" style="margin-top:8px">
+        <input id="batchId" placeholder="batch_id (e.g., 2026-02-18T10:33:12Z#0001)" />
+        <button id="btnVerify">Verify</button>
+      </div>
+      <div class="muted">Tip: click "Fetch latest batches" and copy an id.</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Submit a single event (manual)</h3>
+      <div class="row" style="margin-top:8px">
+        <button id="btnSendEvent">Send example event</button>
+      </div>
+      <div class="muted">Useful to show the JSON schema for a "near-miss" or "hazard-entry".</div>
+    </div>
+  </div>
+
+  <h3>Output</h3>
+  <pre id="out">Ready.</pre>
+
+  <script src="app.js"></script>
+</body>
+</html>

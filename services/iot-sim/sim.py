@@ -30,7 +30,6 @@ SESSION.headers["Content-Type"] = "application/json"
 SESSION.headers["X-Role"] = "operator"
 
 
-#  Site topology 
 
 ZONES = {
     "Z01": {"name": "Main Entrance",      "risk": 1},
@@ -85,7 +84,6 @@ def submit(event: dict) -> dict:
     return resp.json()
 
 
-#  Scenarios 
 
 def run_normal(eps: float, duration: int):
     """Scenario A: Normal construction site monitoring."""
@@ -113,12 +111,12 @@ def run_normal(eps: float, duration: int):
 
 
 def run_accident():
-    """Scenario B: Full incident causal chain (entry → PPE violation → fall).
+    """Scenario B: Full incident causal chain (entry -> PPE violation -> fall).
 
     This produces the event chain referenced in docs/legal-use-cases.md (LC1).
     The chain uses deterministic nonces so it's reproducible.
     """
-    print("[accident] Simulating incident chain: entry → PPE violation → fall")
+    print("[accident] Simulating incident chain: entry -> PPE violation -> fall")
     actor, zone = "W007", "Z02"
     now = utc_now()
 
@@ -153,7 +151,7 @@ def run_accident():
 
 def run_near_miss():
     """Scenario C: Escalating near-miss chain."""
-    print("[near_miss] Escalating chain: zone entry → hazard → proximity → near-miss")
+    print("[near_miss] Escalating chain: zone entry -> hazard -> proximity -> near-miss")
     actor, zone = "W003", "Z04"
     now = utc_now()
 
@@ -225,19 +223,19 @@ def run_fraud():
 
     tampered = {k: ev.get(k) for k in CANONICAL_FIELDS if ev.get(k) is not None}
     tampered["schema_version"] = "1.0"
-    tampered["severity"] = 1  # <<< tampered: 4 → 1
+    tampered["severity"] = 1  # <<< tampered: 4 -> 1
     raw = _json.dumps(_sort_keys(tampered), separators=(",", ":"), ensure_ascii=False)
     raw = unicodedata.normalize("NFC", raw)
     tampered_hash = hashlib.sha256(raw.encode()).hexdigest()
 
-    print(f"\n  Tampered severity: 4 → 1")
+    print(f"\n  Tampered severity: 4 -> 1")
     print(f"  Tampered hash: {tampered_hash}")
     print(f"  Original hash: {original_hash}")
     print(f"  Hashes differ: {original_hash != tampered_hash}")
 
     # Now manually check via stored hash comparison (verifier approach)
     print(f"\n  Stored on-chain (Merkle root) vs tampered Merkle root:")
-    print(f"  → Tampered hash differs from stored → Merkle root mismatch → FAIL")
+    print(f"  -> Tampered hash differs from stored -> Merkle root mismatch -> FAIL")
     print(f"  Threat T2 (payload tampering) DETECTED.")
 
 

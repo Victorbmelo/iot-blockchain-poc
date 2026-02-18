@@ -49,7 +49,6 @@ def api(path, **kwargs):
     return resp.json()
 
 
-#  Core verifier 
 
 def verify_batch(batch_id: str) -> dict:
     """Call the gateway's /verify/batch endpoint and return result."""
@@ -76,7 +75,6 @@ def verify_event(event_id: str) -> dict:
     return result
 
 
-#  Fraud scenarios (T1, T2, T3) 
 
 def run_fraud_scenarios():
     """Run three narrative fraud scenarios and report PASS/FAIL on each.
@@ -84,9 +82,9 @@ def run_fraud_scenarios():
     These scenarios correspond to T1, T2, T3 in docs/threat-model.md.
     They require the gateway to be running with at least one anchored batch.
     """
-    print("\n" + "═" * 60)
+    print("\n" + "-" * 60)
     print("Fraud / Tamper Scenarios")
-    print("═" * 60)
+    print("-" * 60)
 
     results = []
 
@@ -106,8 +104,8 @@ def run_fraud_scenarios():
     target_event = batch_events[0]
     event_id = target_event["event_id"]
 
-    #  T2: Payload tamper 
-    print("\nT2: Payload tampering (severity 4 → 1)")
+    # -- T2: Payload tamper --------------------------------------------------
+    print("\nT2: Payload tampering (severity 4 -> 1)")
     print(f"  Target event: {event_id}")
     original_hash = target_event["event_hash"]
     print(f"  Stored hash:  {original_hash[:32]}...")
@@ -136,10 +134,10 @@ def run_fraud_scenarios():
         "hashes_differ": not hash_match,
         "verdict": "PASS - tamper detected" if not hash_match else "FAIL - tamper NOT detected",
     }
-    print(f"  Hashes differ:  {not hash_match}  →  {t2_result['verdict']}")
+    print(f"  Hashes differ:  {not hash_match}  ->  {t2_result['verdict']}")
     results.append(t2_result)
 
-    #  T3: Extra event injection 
+    # -- T3: Extra event injection --------------------------------------------
     print("\nT3: Extra event injection (Merkle tree tampering)")
     from sys import path as _path
     # Rebuild Merkle root with all events
@@ -186,7 +184,7 @@ def run_fraud_scenarios():
     print(f"  {t3_result['verdict']}")
     results.append(t3_result)
 
-    #  T1: Deletion simulation 
+    # -- T1: Deletion simulation ----------------------------------------------
     print("\nT1: Event deletion from batch (simulated)")
     deleted_hashes = all_hashes[1:]  # remove first event
     deleted_root = compute_root(deleted_hashes)
@@ -209,7 +207,6 @@ def run_fraud_scenarios():
     return results
 
 
-#  Main 
 
 def main():
     parser = argparse.ArgumentParser(description="Audit Batch Verifier")
@@ -240,7 +237,7 @@ def main():
         fraud_results = run_fraud_scenarios()
         out_json = out_dir / f"fraud_{ts}.json"
         out_json.write_text(json.dumps(fraud_results, indent=2))
-        print(f"\nFraud results → {out_json}")
+        print(f"\nFraud results -> {out_json}")
         passed = sum(1 for r in fraud_results if "PASS" in r.get("verdict", ""))
         print(f"Scenarios: {len(fraud_results)} total, {passed} PASS")
         return
@@ -283,7 +280,7 @@ def main():
         passed = sum(1 for r in results if r.get("verdict") == "PASS")
         failed = sum(1 for r in results if r.get("verdict") == "FAIL")
         print(f"\nTotal: {len(results)}  PASS: {passed}  FAIL: {failed}")
-        print(f"Results → {out_json}  {out_csv}")
+        print(f"Results -> {out_json}  {out_csv}")
 
 
 if __name__ == "__main__":

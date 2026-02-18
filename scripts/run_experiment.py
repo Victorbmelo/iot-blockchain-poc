@@ -145,7 +145,7 @@ def save(run_dir: Path, result: ExpResult, events: list, extra: dict = None):
     report = {"result": asdict(result), "events_sample": events[:5]}
     if extra: report.update(extra)
     (run_dir / "report.json").write_text(json.dumps(report, indent=2))
-    print(f"  → {run_dir}")
+    print(f"  -> {run_dir}")
 
 
 def print_result(r: ExpResult):
@@ -158,7 +158,6 @@ def print_result(r: ExpResult):
     print(f"{'-'*60}")
 
 
-#  E1: Functional correctness 
 def exp_e1(results_base):
     EXP, NAME = "E1", "Functional Correctness"
     print(f"\n[{EXP}] {NAME}")
@@ -182,7 +181,7 @@ def exp_e1(results_base):
 
     # Idempotency check
     dup = events_to_submit[0].copy()
-    _, _, dup_ok = submit(dup)  # same nonce = same eventId → should succeed (idempotent return)
+    _, _, dup_ok = submit(dup)  # same nonce = same eventId -> should succeed (idempotent return)
     print(f"  Idempotent re-submit: {'OK' if dup_ok else 'unexpected FAIL'}")
 
     # Field verification (sample 3 events)
@@ -207,7 +206,6 @@ def exp_e1(results_base):
     print_result(result); return result
 
 
-#  E2: Tamper detection 
 def exp_e2(results_base):
     EXP, NAME = "E2", "Tamper Detection"
     print(f"\n[{EXP}] {NAME}")
@@ -226,7 +224,7 @@ def exp_e2(results_base):
 
     force_batch()
 
-    # Verify originals → expect PASS
+    # Verify originals -> expect PASS
     orig_pass = 0
     for ev, stored in submitted:
         h = canonical_hash(ev)
@@ -234,10 +232,10 @@ def exp_e2(results_base):
                          headers={"X-Role": "inspector"}, timeout=10).json()
         if r.get("verdict") == "PASS" and r.get("hash_match"): orig_pass += 1
 
-    # Tamper each → expect FAIL (different hash → Merkle mismatch)
+    # Tamper each -> expect FAIL (different hash -> Merkle mismatch)
     tamper_detected = 0
     for ev, stored in submitted:
-        tampered = dict(ev); tampered["severity"] = 0  # 4 → 0
+        tampered = dict(ev); tampered["severity"] = 0  # 4 -> 0
         tampered_hash = canonical_hash(tampered)
         stored_hash = stored.get("event_hash", "")
         if tampered_hash != stored_hash: tamper_detected += 1  # detected: hashes differ
@@ -252,7 +250,6 @@ def exp_e2(results_base):
     print_result(result); return result
 
 
-#  E3: Batch integrity 
 def exp_e3(results_base):
     EXP, NAME = "E3", "Batch Integrity (Merkle + Ledger)"
     print(f"\n[{EXP}] {NAME}")
@@ -275,7 +272,7 @@ def exp_e3(results_base):
         r = SESSION.get(f"{GATEWAY}/verify/batch/{b['batch_id']}",
                         headers={"X-Role": "inspector"}, timeout=15).json()
         verify_results.append(r)
-        print(f"  batch {b['batch_id'][:30]} → {r.get('verdict')} {r.get('reason','')[:50]}")
+        print(f"  batch {b['batch_id'][:30]} -> {r.get('verdict')} {r.get('reason','')[:50]}")
 
     pass_count = sum(1 for r in verify_results if r.get("verdict") == "PASS")
     notes = f"Verified {len(verify_results)} batches. PASS: {pass_count}. FAIL: {len(verify_results)-pass_count}"
@@ -286,10 +283,9 @@ def exp_e3(results_base):
     print_result(result); return result
 
 
-#  E4: Incident end-to-end 
 def exp_e4(results_base):
     EXP, NAME = "E4", "Incident End-to-End"
-    print(f"\n[{EXP}] {NAME}: ZONE_ENTRY → PPE_VIOLATION → FALL_DETECTED")
+    print(f"\n[{EXP}] {NAME}: ZONE_ENTRY -> PPE_VIOLATION -> FALL_DETECTED")
     started = utc_now(); latencies = []; ok = 0
 
     chain = [
@@ -323,7 +319,6 @@ def exp_e4(results_base):
     print_result(result); return result
 
 
-#  E5: Throughput 
 def exp_e5(results_base, eps=10.0, duration=120):
     EXP, NAME = "E5", "Throughput Under Load"
     import random
@@ -362,7 +357,6 @@ def exp_e5(results_base, eps=10.0, duration=120):
     print_result(result); return result
 
 
-#  E6: Fraud cases 
 def exp_e6(results_base):
     EXP, NAME = "E6", "Fraud Scenario Verification (T1/T2/T3)"
     print(f"\n[{EXP}] {NAME}")

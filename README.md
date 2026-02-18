@@ -8,31 +8,31 @@
 
 ```
 IoT Simulators
-    │  POST /events (JSON)
-    ▼
+    |  POST /events (JSON)
+    v
 Audit Gateway (FastAPI)
-    │  validate → hash → store
-    ▼
+    |  validate -> hash -> store
+    v
 PostgreSQL (operational store)
   events table    - individual events + SHA-256 hashes
   batches table   - Merkle batch records
-    │
-    │  Every BATCH_WINDOW_SECONDS:
-    │  1. Pull PENDING events
-    │  2. Compute merkle_root = MerkleRoot(sorted event hashes)
-    │  3. Compute meta_hash   = SHA256(canonical batch metadata)
-    │  4. Call storeBatchRoot(batch_id, merkle_root, meta_hash)
-    ▼
+    |
+    |  Every BATCH_WINDOW_SECONDS:
+    |  1. Pull PENDING events
+    |  2. Compute merkle_root = MerkleRoot(sorted event hashes)
+    |  3. Compute meta_hash   = SHA256(canonical batch metadata)
+    |  4. Call storeBatchRoot(batch_id, merkle_root, meta_hash)
+    v
 Hyperledger Besu (permissioned EVM)
   AuditAnchor.sol
-    mapping(batchId → {merkleRoot, metaHash, blockTs, submitter})
+    mapping(batchId -> {merkleRoot, metaHash, blockTs, submitter})
     write-once: storeBatchRoot reverts if batchId already exists
-    ▼
+    v
 Verifier (independent)
   1. Fetch events from Postgres
   2. Recompute hashes + Merkle root
   3. Fetch root from Besu via getAnchor()
-  4. Compare → PASS or FAIL + reason
+  4. Compare -> PASS or FAIL + reason
 ```
 
 **Why batching + Merkle?**
@@ -80,13 +80,13 @@ make demo-fraud        # just the tamper detection scene
 
 **Verify integrity:**
 ```bash
-make verify            # all anchored batches → PASS/FAIL
+make verify            # all anchored batches -> PASS/FAIL
 make fraud-cases       # T1/T2/T3 fraud scenarios
 ```
 
 **Run Chapter 5 experiments:**
 ```bash
-make exp-all EPS=10 DURATION=120   # all experiments → results/
+make exp-all EPS=10 DURATION=120   # all experiments -> results/
 python scripts/collect_metrics.py  # print + CSV for LaTeX table
 ```
 
@@ -98,6 +98,7 @@ python scripts/collect_metrics.py  # print + CSV for LaTeX table
 |---|---|---|
 | Audit Gateway | 8000 | http://localhost:8000 |
 | API docs | 8000 | http://localhost:8000/docs |
+| Demo UI | 8000 | http://localhost:8000/ui |
 | PostgreSQL | 5432 | postgresql://audit:audit@localhost/auditdb |
 | Besu JSON-RPC | 8545 | http://localhost:8545 |
 | Besu WebSocket | 8546 | ws://localhost:8546 |
@@ -110,10 +111,10 @@ Pass `X-Role: <role>` header. In production, role is derived from client TLS cer
 
 | Role | Submit | Read | Verify | Export |
 |---|---|---|---|---|
-| operator | ✓ | - | - | - |
-| safety_manager | - | ✓ | - | - |
-| inspector | - | ✓ | ✓ | ✓ |
-| insurer | - | ✓ | ✓ | - |
+| operator | [OK] | - | - | - |
+| safety_manager | - | [OK] | - | - |
+| inspector | - | [OK] | [OK] | [OK] |
+| insurer | - | [OK] | [OK] | - |
 
 ---
 
@@ -137,9 +138,9 @@ Any modification to any included field produces a different hash, detectable by 
 
 | Threat | Mechanism |
 |---|---|
-| T1: Delete event from batch | Event hash absent from Merkle tree → verify FAIL |
-| T2: Tamper event payload | SHA-256 mismatch → recomputed hash ≠ stored hash → FAIL |
-| T3: Inject fake event | Injected hash changes Merkle root → anchor mismatch → FAIL |
+| T1: Delete event from batch | Event hash absent from Merkle tree -> verify FAIL |
+| T2: Tamper event payload | SHA-256 mismatch -> recomputed hash != stored hash -> FAIL |
+| T3: Inject fake event | Injected hash changes Merkle root -> anchor mismatch -> FAIL |
 | T4: Reorder events | Batch window bounds in `metaHash` are immutable on-chain |
 | T5: Replay batch anchor | `storeBatchRoot` reverts on duplicate batchId (write-once) |
 | T6: Unilateral ledger write | `authorisedSubmitters` RBAC in contract; extensible to multisig |

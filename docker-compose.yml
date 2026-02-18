@@ -13,7 +13,7 @@ version: "3.9"
 #   make up        - start everything (gateway waits for Postgres + Besu)
 #   make seed      - generate 200 normal events
 #   make verify    - verify all anchored batches
-#   make results   - run all experiments → results/*.csv
+#   make results   - run all experiments -> results/*.csv
 
 networks:
   audit-net:

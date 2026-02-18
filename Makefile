@@ -1,4 +1,4 @@
-# Immutable Audit Layer - Makefile
+# Immutable Audit Layer — Makefile
 # All commands run from repo root in WSL or Linux.
 # Requires: Docker Desktop with WSL2 integration enabled.
 
@@ -16,7 +16,7 @@ DURATION    ?= 120
         stats clean
 
 help:
-	@echo "Immutable Audit Layer - Politecnico di Torino"
+	@echo "Immutable Audit Layer — Politecnico di Torino"
 	@echo ""
 	@echo "Stack"
 	@echo "  make up              Start all containers (Postgres + Besu + Gateway)"

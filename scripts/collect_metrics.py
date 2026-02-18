@@ -29,14 +29,14 @@ def main():
               f"{float(r.get('latency_p95_ms',0)):>7.1f} "
               f"{float(r.get('latency_p99_ms',0)):>7.1f} "
               f"{float(r.get('error_rate_pct',0)):>5.1f}% "
-              f"{'✓' if r.get('criteria_met','False')=='True' else '✗'}")
+              f"{'[OK]' if r.get('criteria_met','False')=='True' else '[FAIL]'}")
 
     # Write combined CSV for LaTeX table
     out = results_dir / "chapter5_table.csv"
     if rows:
         with open(out, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=rows[0].keys()); w.writeheader(); w.writerows(rows)
-        print(f"\nChapter 5 table → {out}")
+        print(f"\nChapter 5 table -> {out}")
 
 if __name__ == "__main__":
     main()

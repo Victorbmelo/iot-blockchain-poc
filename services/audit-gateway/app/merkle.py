@@ -6,7 +6,7 @@ anchored on-chain via storeBatchRoot(). Any event can later be proven to be
 part of the batch with O(log N) sibling hashes.
 
 Canonical tree:
-  Leaves are sorted before building → same set of events always produces
+  Leaves are sorted before building -> same set of events always produces
   the same root, regardless of submission order.
 
 Hashing:

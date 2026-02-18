@@ -6,10 +6,10 @@ GW="${GATEWAY:-http://localhost:8000}"
 PAUSE="${PAUSE:-2}"
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
 
-banner() { echo -e "\n${BOLD}${CYAN}━━━ $* ━━━${NC}\n"; }
-step()   { echo -e "${YELLOW}▶ $*${NC}"; }
-ok()     { echo -e "${GREEN}✓ $*${NC}"; }
-fail()   { echo -e "${RED}✗ $*${NC}"; }
+banner() { echo -e "\n${BOLD}${CYAN}--- $* ---${NC}\n"; }
+step()   { echo -e "${YELLOW}> $*${NC}"; }
+ok()     { echo -e "${GREEN}[OK] $*${NC}"; }
+fail()   { echo -e "${RED}[FAIL] $*${NC}"; }
 
 wait_gw() {
     step "Checking gateway..."
@@ -53,7 +53,7 @@ scene_monitor() {
 
 scene_accident() {
     banner "Scene 2 - Incident Causal Chain"
-    echo "Full chain: ZONE_ENTRY → PPE_VIOLATION → PROXIMITY_ALERT → NEAR_MISS → FALL_DETECTED"
+    echo "Full chain: ZONE_ENTRY -> PPE_VIOLATION -> PROXIMITY_ALERT -> NEAR_MISS -> FALL_DETECTED"
     sleep "$PAUSE"
 
     TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -80,7 +80,7 @@ scene_accident() {
 
 scene_near_miss() {
     banner "Scene 3 - Near-Miss Escalation"
-    echo "Escalation: HAZARD_ENTRY → PPE_VIOLATION → PROXIMITY_ALERT → NEAR_MISS"
+    echo "Escalation: HAZARD_ENTRY -> PPE_VIOLATION -> PROXIMITY_ALERT -> NEAR_MISS"
     sleep "$PAUSE"
 
     TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -99,7 +99,7 @@ scene_near_miss() {
 
 scene_fraud() {
     banner "Scene 4 - Tamper Detection (Core Demo)"
-    echo "Submit NEAR_MISS (severity 4). Attacker modifies severity → 1."
+    echo "Submit NEAR_MISS (severity 4). Attacker modifies severity -> 1."
     echo "Merkle root mismatch detects tampering."
     echo ""
     sleep "$PAUSE"
@@ -120,7 +120,7 @@ scene_fraud() {
     else fail "Unexpected: $V"; fi
     sleep "$PAUSE"
 
-    step "Attacker modifies severity: 4 → 1 (recomputes hash)"
+    step "Attacker modifies severity: 4 -> 1 (recomputes hash)"
     TAMPERED_HASH=$(python3 -c "
 import hashlib, json, unicodedata
 p = {'schema_version':'1.0','event_type':'NEAR_MISS','ts':'$TS',
@@ -140,7 +140,7 @@ print(hashlib.sha256(unicodedata.normalize('NFC',r).encode()).hexdigest())
 
     step "Tampered hash vs stored Merkle root (expected: FAIL)"
     if [ "$EHASH" != "$TAMPERED_HASH" ]; then
-        fail "FAIL - tampered hash differs from stored hash → Merkle root mismatch"
+        fail "FAIL - tampered hash differs from stored hash -> Merkle root mismatch"
         ok "Threat T2 (payload tampering) DETECTED - original record intact on chain"
     else
         echo "  (hashes match - unexpected)"
