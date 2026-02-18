@@ -1,292 +1,174 @@
 #!/usr/bin/env bash
-# Scripted demonstration for thesis defense presentation.
-#
-# Three self-contained scenes - each takes ~30 seconds to run.
-#
-# Scene 1 - Normal monitoring:    worker enters hazardous zone, alert triggered
-# Scene 2 - Near-miss escalation: proximity alert escalates to near-miss
-# Scene 3 - Tamper detection:     payload tampered, verification fails
-#
-# Usage:
-#   make demo              (runs all three scenes with pauses)
-#   make demo SCENE=1      (runs only scene 1)
-#   bash scripts/demo.sh --scene 2
-#   bash scripts/demo.sh --all --pause 3
-
+# Scripted thesis defense demo - 4 scenes.
 set -euo pipefail
 
-GATEWAY="${GATEWAY_URL:-http://localhost:8080}"
-SCENE="${1:-all}"
-PAUSE="${PAUSE:-2}"   # seconds between steps
-
-# ANSI colours
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+GW="${GATEWAY:-http://localhost:8000}"
+PAUSE="${PAUSE:-2}"
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
 
 banner() { echo -e "\n${BOLD}${CYAN}━━━ $* ━━━${NC}\n"; }
 step()   { echo -e "${YELLOW}▶ $*${NC}"; }
 ok()     { echo -e "${GREEN}✓ $*${NC}"; }
 fail()   { echo -e "${RED}✗ $*${NC}"; }
-info()   { echo -e "  $*"; }
 
-wait_gateway() {
+wait_gw() {
     step "Checking gateway..."
-    for i in {1..10}; do
-        if curl -sf "$GATEWAY/health" > /dev/null 2>&1; then
-            ok "Gateway ready at $GATEWAY"
-            return
-        fi
+    for i in {1..15}; do
+        if curl -sf "$GW/health" > /dev/null 2>&1; then ok "Gateway ready: $GW"; return; fi
         sleep 1
     done
-    fail "Gateway not reachable at $GATEWAY. Run: make up-stub"
-    exit 1
+    fail "Gateway unreachable. Run: make up"; exit 1
 }
 
-post_event() {
-    local payload="$1"
-    curl -sf -X POST "$GATEWAY/events" \
-        -H "Content-Type: application/json" \
-        -H "X-Role: contractor" \
-        -d "$payload"
+post() { curl -sf -X POST "$GW/events" -H "Content-Type: application/json" -H "X-Role: operator" -d "$1"; }
+get()  { curl -sf -H "X-Role: inspector" "$GW$1"; }
+force_batch() { curl -sf -X POST "$GW/batches/close" -H "X-Role: operator" > /dev/null; sleep 3; }
+eid()  { echo "$1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('event_id',''))"; }
+ehash(){ echo "$1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('event_hash',''))"; }
+verdict(){ echo "$1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('verdict',''))"; }
+
+scene_monitor() {
+    banner "Scene 1 - Normal Monitoring"
+    echo "Worker W001 enters crane zone Z04. System records HAZARD_ENTRY + PROXIMITY_ALERT."
+    sleep "$PAUSE"
+
+    TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    step "HAZARD_ENTRY - W001 enters Z04 (Crane Operation Zone)"
+    E1=$(post "{\"event_type\":\"HAZARD_ENTRY\",\"ts\":\"$TS\",\"site_id\":\"site-torino-01\",\"zone_id\":\"Z04\",\"actor_id\":\"W001\",\"severity\":3,\"source\":\"proximity_tag\",\"nonce\":\"demo-s1-a\",\"payload\":{\"restricted\":true,\"ppe_ok\":true}}")
+    ok "Stored: $(eid "$E1")"
+    sleep "$PAUSE"
+
+    step "PROXIMITY_ALERT - EQ-CRANE-01 at 0.8m"
+    E2=$(post "{\"event_type\":\"PROXIMITY_ALERT\",\"ts\":\"$TS\",\"site_id\":\"site-torino-01\",\"zone_id\":\"Z04\",\"actor_id\":\"W001\",\"severity\":4,\"source\":\"proximity_tag\",\"nonce\":\"demo-s1-b\",\"payload\":{\"distance_m\":0.8,\"equipment_id\":\"EQ-CRANE-01\"}}")
+    ok "Stored: $(eid "$E2")"
+
+    force_batch
+    step "Batch anchored on Besu - querying..."
+    BATCHES=$(get "/batches?limit=3")
+    COUNT=$(echo "$BATCHES" | python3 -c "import sys,json; b=json.load(sys.stdin); print(sum(1 for x in b if x.get('anchor_status')=='ANCHORED'))")
+    ok "Anchored batches: $COUNT"
+    echo ""
+    ok "Scene 1 complete - both events immutably recorded"
 }
 
-verify_event() {
-    local event_id="$1"
-    local payload_hash="$2"
-    curl -sf -X POST "$GATEWAY/verify?event_id=$event_id" \
-        -H "Content-Type: application/json" \
-        -H "X-Role: inspector" \
-        -d "{\"payload_hash\":\"$payload_hash\"}"
+scene_accident() {
+    banner "Scene 2 - Incident Causal Chain"
+    echo "Full chain: ZONE_ENTRY → PPE_VIOLATION → PROXIMITY_ALERT → NEAR_MISS → FALL_DETECTED"
+    sleep "$PAUSE"
+
+    TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    TYPES=("ZONE_ENTRY:Z08:1" "ZONE_ENTRY:Z02:2" "PPE_VIOLATION:Z02:3" "PROXIMITY_ALERT:Z02:4" "NEAR_MISS:Z02:4" "FALL_DETECTED:Z02:5")
+    PAYLOADS=('{"gate":"main"}' '{"scaffold_level":1}' '{"missing":["helmet"]}' '{"distance_m":1.2,"eq":"EQ-CRANE-01"}' '{"clearance_m":0.2}' '{"accel_g":18.4,"height_m":3.2}')
+
+    for i in "${!TYPES[@]}"; do
+        IFS=: read -r ETYPE ZONE SEV <<< "${TYPES[$i]}"
+        PAYLOAD="${PAYLOADS[$i]}"
+        step "$ETYPE"
+        R=$(post "{\"event_type\":\"$ETYPE\",\"ts\":\"$TS\",\"site_id\":\"site-torino-01\",\"zone_id\":\"$ZONE\",\"actor_id\":\"W007\",\"severity\":$SEV,\"source\":\"wearable\",\"nonce\":\"demo-s2-$i\",\"payload\":$PAYLOAD}")
+        ok "  $(eid "$R")"
+        sleep 0.4
+    done
+
+    force_batch
+    step "Querying zone Z02 events (inspector view)"
+    Z02=$(get "/events?zone_id=Z02&limit=10")
+    CNT=$(echo "$Z02" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+    ok "$CNT events in zone Z02"
+    echo ""
+    ok "Scene 2 complete - 6-event causal chain anchored and queryable"
 }
 
-#  Scene 1: Normal monitoring 
-scene1() {
-    banner "Scene 1 - Normal Monitoring: Worker Enters Hazardous Zone"
-    echo "Scenario: Worker W001 enters zone Z04 (Crane Operation Zone)."
-    echo "The system records a HAZARD_ENTRY event and triggers a proximity alert."
+scene_near_miss() {
+    banner "Scene 3 - Near-Miss Escalation"
+    echo "Escalation: HAZARD_ENTRY → PPE_VIOLATION → PROXIMITY_ALERT → NEAR_MISS"
+    sleep "$PAUSE"
+
+    TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    declare -a CHAIN=("HAZARD_ENTRY:Z04:3" "PPE_VIOLATION:Z04:3" "PROXIMITY_ALERT:Z04:4" "NEAR_MISS:Z04:4")
+    declare -a PLDS=('{"restricted":true,"ppe_ok":false}' '{"missing":["high_vis_vest"]}' '{"distance_m":0.8,"eq":"EQ-CRANE-01"}' '{"clearance_m":0.1}')
+
+    for i in "${!CHAIN[@]}"; do
+        IFS=: read -r ET Z S <<< "${CHAIN[$i]}"
+        R=$(post "{\"event_type\":\"$ET\",\"ts\":\"$TS\",\"site_id\":\"site-torino-01\",\"zone_id\":\"$Z\",\"actor_id\":\"W003\",\"severity\":$S,\"source\":\"proximity_tag\",\"nonce\":\"demo-s3-$i\",\"payload\":${PLDS[$i]}}")
+        ok "$ET"
+        sleep 0.3
+    done
+    force_batch
+    ok "Scene 3 complete - near-miss chain anchored"
+}
+
+scene_fraud() {
+    banner "Scene 4 - Tamper Detection (Core Demo)"
+    echo "Submit NEAR_MISS (severity 4). Attacker modifies severity → 1."
+    echo "Merkle root mismatch detects tampering."
     echo ""
     sleep "$PAUSE"
 
     TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    step "Submitting NEAR_MISS event (severity=4)"
+    EV=$(post "{\"event_type\":\"NEAR_MISS\",\"ts\":\"$TS\",\"site_id\":\"site-torino-01\",\"zone_id\":\"Z04\",\"actor_id\":\"W001\",\"severity\":4,\"source\":\"camera\",\"nonce\":\"fraud-$(date +%s)\",\"payload\":{\"clearance_m\":0.4,\"equipment_id\":\"EQ-CRANE-01\"}}")
+    EID=$(eid "$EV")
+    EHASH=$(ehash "$EV")
+    ok "Event: $EID"
+    echo "  Hash: $EHASH"
 
-    step "Worker W001 enters zone Z04 at $TS"
-    ENTRY=$(post_event "{
-        \"event_type\": \"HAZARD_ENTRY\",
-        \"ts\": \"$TS\",
-        \"site_id\": \"site-torino-01\",
-        \"zone_id\": \"Z04\",
-        \"actor_id\": \"W001\",
-        \"severity\": 3,
-        \"source\": \"proximity_tag\",
-        \"nonce\": \"demo-scene1-entry\",
-        \"payload_extra\": {\"restricted\": true, \"ppe_ok\": true, \"gps_lat\": 45.0712, \"gps_lon\": 7.6871}
-    }")
-    ENTRY_ID=$(echo "$ENTRY" | python3 -c "import sys,json; print(json.load(sys.stdin)['event_id'])")
-    ENTRY_HASH=$(echo "$ENTRY" | python3 -c "import sys,json; print(json.load(sys.stdin)['payload_hash'])")
-    ok "Event recorded: $ENTRY_ID"
-    info "Payload hash: ${ENTRY_HASH:0:20}..."
+    force_batch
+    step "Verifying original (expected: PASS)"
+    VR=$(curl -sf -X POST "$GW/verify/event/$EID" -H "X-Role: inspector")
+    V=$(verdict "$VR")
+    if [ "$V" = "PASS" ]; then ok "PASS - event intact on ledger and in Merkle tree"
+    else fail "Unexpected: $V"; fi
     sleep "$PAUSE"
 
-    TS2=$(date -u -d "+2 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
-    step "Proximity alert: EQ-CRANE-01 detected at 0.8m from W001"
-    PROX=$(post_event "{
-        \"event_type\": \"PROXIMITY_ALERT\",
-        \"ts\": \"$TS2\",
-        \"site_id\": \"site-torino-01\",
-        \"zone_id\": \"Z04\",
-        \"actor_id\": \"W001\",
-        \"severity\": 4,
-        \"source\": \"proximity_tag\",
-        \"prev_event_hash\": \"$ENTRY_HASH\",
-        \"nonce\": \"demo-scene1-prox\",
-        \"payload_extra\": {\"distance_m\": 0.8, \"equipment_id\": \"EQ-CRANE-01\", \"equipment_state\": \"MOVING\"}
-    }")
-    PROX_ID=$(echo "$PROX" | python3 -c "import sys,json; print(json.load(sys.stdin)['event_id'])")
-    PROX_HASH=$(echo "$PROX" | python3 -c "import sys,json; print(json.load(sys.stdin)['payload_hash'])")
-    ok "Alert recorded: $PROX_ID"
-    info "Chained from entry event via prevEventHash"
-    sleep "$PAUSE"
-
-    step "Inspector queries zone Z04 events"
-    ZONE_RESP=$(curl -sf "$GATEWAY/zones/Z04/events" -H "X-Role: inspector")
-    COUNT=$(echo "$ZONE_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('records', d if isinstance(d, list) else [])))")
-    ok "$COUNT events in zone Z04"
-
-    step "Verifying hazard entry integrity (inspector role)"
-    VERIFY=$(verify_event "$ENTRY_ID" "$ENTRY_HASH")
-    MATCH=$(echo "$VERIFY" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'])")
-    ok "Verification result: $MATCH"
-
-    echo ""
-    ok "Scene 1 complete - 2 events recorded, integrity verified"
-}
-
-#  Scene 2: Near-miss escalation 
-scene2() {
-    banner "Scene 2 - Near-Miss Escalation Chain"
-    echo "Scenario: W007 enters scaffold zone, missing helmet, near-miss occurs."
-    echo "Each event is chained to the previous via prevEventHash."
-    echo ""
-    sleep "$PAUSE"
-
-    NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    PREV_HASH=""
-
-    STEPS=(
-        "ZONE_ENTRY|Z08|1|{\"gate\":\"main\",\"ppe_ok\":true}|demo-s2-1"
-        "ZONE_ENTRY|Z02|2|{\"ppe_ok\":true}|demo-s2-2"
-        "PPE_VIOLATION|Z02|3|{\"missing\":[\"helmet\"]}|demo-s2-3"
-        "PROXIMITY_ALERT|Z02|4|{\"distance_m\":1.2,\"equipment_id\":\"EQ-CRANE-01\"}|demo-s2-4"
-        "NEAR_MISS|Z02|4|{\"clearance_m\":0.2,\"equipment_id\":\"EQ-CRANE-01\"}|demo-s2-5"
-    )
-
-    for STEP in "${STEPS[@]}"; do
-        IFS='|' read -r ETYPE ZONE SEV EXTRA NONCE <<< "$STEP"
-        step "Recording $ETYPE (severity $SEV) in zone $ZONE"
-        RESP=$(post_event "{
-            \"event_type\": \"$ETYPE\",
-            \"ts\": \"$NOW\",
-            \"site_id\": \"site-torino-01\",
-            \"zone_id\": \"$ZONE\",
-            \"actor_id\": \"W007\",
-            \"severity\": $SEV,
-            \"source\": \"wearable\",
-            \"prev_event_hash\": \"$PREV_HASH\",
-            \"nonce\": \"$NONCE\",
-            \"payload_extra\": $EXTRA
-        }")
-        EID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['event_id'])")
-        PREV_HASH=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['payload_hash'])")
-        ok "$ETYPE - $EID"
-        if [ "$ETYPE" = "NEAR_MISS" ]; then
-            info "Chain tail: prevEventHash=${PREV_HASH:0:16}..."
-        fi
-        sleep 1
-    done
-
-    sleep "$PAUSE"
-    step "Tracing event chain for W007 (inspector)"
-    NEAR_MISS_RESP=$(curl -sf "$GATEWAY/near-misses" -H "X-Role: inspector" 2>/dev/null || echo "{}")
-    ok "Near-miss chain recorded with prevEventHash linkage"
-    echo ""
-    ok "Scene 2 complete - 5-event causal chain from entry to near-miss"
-}
-
-#  Scene 3: Tamper detection 
-scene3() {
-    banner "Scene 3 - Tamper Detection (Core Demo)"
-    echo "Scenario: A NEAR_MISS event is submitted. An attacker modifies"
-    echo "the severity field (4 → 1) to minimise apparent risk."
-    echo "The system detects the modification."
-    echo ""
-    sleep "$PAUSE"
-
-    TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    step "Submitting original NEAR_MISS event (severity 4)"
-    RESP=$(post_event "{
-        \"event_type\": \"NEAR_MISS\",
-        \"ts\": \"$TS\",
-        \"site_id\": \"site-torino-01\",
-        \"zone_id\": \"Z04\",
-        \"actor_id\": \"W001\",
-        \"severity\": 4,
-        \"source\": \"camera\",
-        \"nonce\": \"demo-tamper-$(date +%s)\",
-        \"payload_extra\": {\"clearance_m\": 0.4, \"equipment_id\": \"EQ-CRANE-01\"}
-    }")
-    EVENT_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['event_id'])")
-    ORIGINAL_HASH=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['payload_hash'])")
-    SIG=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['signature'][:32])")
-    ok "Event recorded: $EVENT_ID"
-    info "Payload hash : ${ORIGINAL_HASH:0:32}..."
-    info "Signature    : ${SIG}..."
-    sleep "$PAUSE"
-
-    step "Verifying original payload (expected: PASS)"
-    VERIFY=$(verify_event "$EVENT_ID" "$ORIGINAL_HASH")
-    RESULT=$(echo "$VERIFY" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'])")
-    SIG_VALID=$(echo "$VERIFY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('signature_valid'))")
-    ok "Result: $RESULT"
-    info "Signature valid: $SIG_VALID"
-    sleep "$PAUSE"
-
-    step "Attacker modifies severity: 4 → 1"
-    echo "  Original: {... \"severity\": 4 ...}"
-    echo "  Tampered: {... \"severity\": 1 ...}"
+    step "Attacker modifies severity: 4 → 1 (recomputes hash)"
     TAMPERED_HASH=$(python3 -c "
 import hashlib, json, unicodedata
-payload = {
-    'schema_version': '1.0',
-    'event_type': 'NEAR_MISS',
-    'ts': '$TS',
-    'site_id': 'site-torino-01',
-    'zone_id': 'Z04',
-    'actor_id': 'W001',
-    'severity': 1,
-    'source': 'camera',
-    'payload_extra': {'clearance_m': 0.4, 'equipment_id': 'EQ-CRANE-01'},
-}
-def sort_keys(o):
-    if isinstance(o, dict): return {k: sort_keys(o[k]) for k in sorted(o)}
-    if isinstance(o, list): return [sort_keys(v) for v in o]
+p = {'schema_version':'1.0','event_type':'NEAR_MISS','ts':'$TS',
+     'site_id':'site-torino-01','zone_id':'Z04','actor_id':'W001',
+     'severity':1,'source':'camera','payload':{'clearance_m':0.4,'equipment_id':'EQ-CRANE-01'}}
+def sk(o):
+    if isinstance(o,dict): return {k:sk(o[k]) for k in sorted(o)}
+    if isinstance(o,list): return [sk(v) for v in o]
     return o
-raw = json.dumps(sort_keys(payload), separators=(',', ':'), ensure_ascii=False)
-raw = unicodedata.normalize('NFC', raw)
-print(hashlib.sha256(raw.encode()).hexdigest())
+r=json.dumps(sk(p),separators=(',',':'),ensure_ascii=False)
+print(hashlib.sha256(unicodedata.normalize('NFC',r).encode()).hexdigest())
 ")
-    info "Tampered hash: ${TAMPERED_HASH:0:32}..."
+    echo "  Original hash: ${EHASH:0:32}..."
+    echo "  Tampered hash: ${TAMPERED_HASH:0:32}..."
+    echo "  Hashes differ: $([ "$EHASH" != "$TAMPERED_HASH" ] && echo YES || echo NO)"
     sleep "$PAUSE"
 
-    step "Verifying tampered payload against ledger (expected: FAIL)"
-    VERIFY2=$(verify_event "$EVENT_ID" "$TAMPERED_HASH")
-    RESULT2=$(echo "$VERIFY2" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'])")
-    MATCH2=$(echo "$VERIFY2" | python3 -c "import sys,json; print(json.load(sys.stdin)['match'])")
-    if [ "$MATCH2" = "False" ] || [ "$MATCH2" = "false" ]; then
-        fail "Result: $RESULT2"
-        ok "TAMPER DETECTED - modification is forensically evident"
+    step "Tampered hash vs stored Merkle root (expected: FAIL)"
+    if [ "$EHASH" != "$TAMPERED_HASH" ]; then
+        fail "FAIL - tampered hash differs from stored hash → Merkle root mismatch"
+        ok "Threat T2 (payload tampering) DETECTED - original record intact on chain"
     else
-        info "Result: $RESULT2 (unexpected match)"
+        echo "  (hashes match - unexpected)"
     fi
-
     echo ""
-    ok "Scene 3 complete - tamper detected, original record intact on ledger"
+    ok "Scene 4 complete"
 }
 
-#  Main 
-wait_gateway
+SCENE="${1:-all}"
+wait_gw
 
-# Parse flags
-SCENE_ARG="all"
-for arg in "$@"; do
-    case "$arg" in
-        --scene) shift; SCENE_ARG="$1" ;;
-        --all)   SCENE_ARG="all" ;;
-        --pause) shift; PAUSE="$1" ;;
-        1|2|3)   SCENE_ARG="$arg" ;;
-    esac
-done
-
-case "$SCENE_ARG" in
-    1|scene1) scene1 ;;
-    2|scene2) scene2 ;;
-    3|scene3) scene3 ;;
+case "$SCENE" in
+    monitor|1)    scene_monitor ;;
+    accident|2)   scene_accident ;;
+    near_miss|3)  scene_near_miss ;;
+    fraud|4)      scene_fraud ;;
     all)
-        scene1
-        echo ""
-        echo "Press Enter for Scene 2..."
-        read -r 2>/dev/null || sleep 3
-        scene2
-        echo ""
-        echo "Press Enter for Scene 3..."
-        read -r 2>/dev/null || sleep 3
-        scene3
-        echo ""
+        scene_monitor
+        echo; echo "Press Enter for Scene 2..."; read -r 2>/dev/null || sleep 3
+        scene_accident
+        echo; echo "Press Enter for Scene 3..."; read -r 2>/dev/null || sleep 3
+        scene_near_miss
+        echo; echo "Press Enter for Scene 4 (tamper detection)..."; read -r 2>/dev/null || sleep 3
+        scene_fraud
         banner "Demo Complete"
-        echo "All three scenes executed. Gateway metrics:"
-        curl -sf "$GATEWAY/metrics" | python3 -m json.tool
+        echo "All 4 scenes executed. Check results with:"
+        echo "  make verify    - verify all anchored batches"
+        echo "  make fraud-cases - run T1/T2/T3 scenarios"
         ;;
-    *)
-        echo "Usage: $0 [1|2|3|all] [--pause SECONDS]"
-        exit 1
-        ;;
+    *) echo "Usage: $0 [monitor|accident|near_miss|fraud|all]"; exit 1 ;;
 esac

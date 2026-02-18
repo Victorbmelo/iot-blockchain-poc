@@ -1,251 +1,224 @@
 # Immutable Audit Layer for IoT Safety Data in Construction Sites
 
-Laurea Magistrale - Politecnico di Torino
+**Laurea Magistrale - Politecnico di Torino**
 
-## What This System Is
-
-A multi-stakeholder accountability framework for construction site safety events, built on Hyperledger Fabric 2.5. It augments existing IoT safety platforms with a permissioned ledger that neither the contractor nor the inspector can alter unilaterally - because both organisations' cryptographic signatures are required on every write transaction.
-
-The system is not a monitoring platform. Its value is post-incident: providing tamper-evident records that are credible to all parties (contractor, inspector, insurer, regulator) without requiring any party to trust a single administrator.
-
-**Key question the system answers:** "Can this safety record have been modified after the incident?"  
-**Answer the ledger provides:** No - here is cryptographic proof, endorsed by both organisations.
-
-See `docs/design-rationale.md` for the formal comparison with append-only databases and digital signatures.
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| `docs/architecture.md` | Component diagram, data flows, chaincode functions |
-| `docs/data-model.md` | Entity schema, on-chain vs off-chain fields, storage estimates |
-| `docs/accountability-framework.md` | Governance model, verification protocol, accountability matrix |
-| `docs/threat-model.md` | Adversaries (A1–A4), concrete threats (T1–T6), residual risks |
-| `docs/design-rationale.md` | Why blockchain over append-only DB + digital signatures |
-| `docs/legal-use-cases.md` | Step-by-step scenarios for inspector, insurer, legal counsel |
-| `docs/experiment-plan.md` | Validation experiments with acceptance criteria |
-| `docs/api-spec.md` | REST API reference |
+---
 
 ## Architecture
 
 ```
-IoT Platform / Simulators
-        |  POST /events
-        v
-  Audit Gateway (FastAPI, Python)
-  validate -> canonical hash -> ECDSA sign -> submit
-        |  gRPC + mutual TLS
-        v
-  Hyperledger Fabric 2.5
-  ┌─────────────────────────────────┐
-  │  Channel: audit-channel         │
-  │  Chaincode: auditcc (Go)        │
-  │  Endorsement: AND(Org1, Org2)   │
-  │                                 │
-  │  Org1 peer + CouchDB (:5984)    │  ← AuditGatewayMSP (writer)
-  │  Org2 peer + CouchDB (:6984)    │  ← InspectorMSP (endorser)
-  │  Orderer (RAFT single node)     │
-  └─────────────────────────────────┘
-        |
-        v
-  MinIO (off-chain evidence store)
-  Full payloads, sensor logs, video evidence
-  Ledger stores: payloadHash + evidenceRef only
+IoT Simulators
+    │  POST /events (JSON)
+    ▼
+Audit Gateway (FastAPI)
+    │  validate → hash → store
+    ▼
+PostgreSQL (operational store)
+  events table    - individual events + SHA-256 hashes
+  batches table   - Merkle batch records
+    │
+    │  Every BATCH_WINDOW_SECONDS:
+    │  1. Pull PENDING events
+    │  2. Compute merkle_root = MerkleRoot(sorted event hashes)
+    │  3. Compute meta_hash   = SHA256(canonical batch metadata)
+    │  4. Call storeBatchRoot(batch_id, merkle_root, meta_hash)
+    ▼
+Hyperledger Besu (permissioned EVM)
+  AuditAnchor.sol
+    mapping(batchId → {merkleRoot, metaHash, blockTs, submitter})
+    write-once: storeBatchRoot reverts if batchId already exists
+    ▼
+Verifier (independent)
+  1. Fetch events from Postgres
+  2. Recompute hashes + Merkle root
+  3. Fetch root from Besu via getAnchor()
+  4. Compare → PASS or FAIL + reason
 ```
 
-## Prerequisites
+**Why batching + Merkle?**
 
-| Tool | Version | Purpose |
+A common banca objection to blockchain audit layers is scalability. This design answers it directly: at 100 events/second with a 5-second window, the ledger sees 1 anchor transaction per 5 seconds (not 500). The Merkle tree provides the same tamper-evidence guarantee as storing all hashes individually, at O(log N) proof overhead.
+
+**Why Besu (permissioned EVM) and not public Ethereum?**
+
+- Zero gas fees (dev/QBFT network)
+- Only `authorisedSubmitters` can call `storeBatchRoot` (RBAC in contract)
+- No data leakage to public network
+- Runs entirely in Docker - no token purchase, no external dependency
+- Swap to Fabric by setting `LEDGER_BACKEND=fabric` and implementing `services/audit-gateway/app/ledger/fabric.py`
+
+---
+
+## Quick Start (WSL2 / Linux)
+
+**Prerequisites:**
+```bash
+# Docker Desktop with WSL2 integration, or Docker Engine on Linux
+docker --version   # 24+
+docker compose version  # 2.x
+```
+
+**Start everything:**
+```bash
+git clone <repo>
+cd iot-blockchain-poc
+make up               # Postgres + Besu + Gateway (waits for healthy)
+make deploy-contract  # Deploy AuditAnchor.sol (run once)
+```
+
+**Generate data:**
+```bash
+make seed     # 200 events at 1 eps for 200s
+make stats    # event counts + batch status
+```
+
+**Run demo (thesis defense):**
+```bash
+make demo              # all 4 scenes (interactive)
+make demo-fraud        # just the tamper detection scene
+```
+
+**Verify integrity:**
+```bash
+make verify            # all anchored batches → PASS/FAIL
+make fraud-cases       # T1/T2/T3 fraud scenarios
+```
+
+**Run Chapter 5 experiments:**
+```bash
+make exp-all EPS=10 DURATION=120   # all experiments → results/
+python scripts/collect_metrics.py  # print + CSV for LaTeX table
+```
+
+---
+
+## Ports
+
+| Service | Port | URL |
 |---|---|---|
-| Docker + Compose v2 | 24+ | All containers |
-| Python | 3.11+ | Gateway, simulator, dashboard |
-| Go | 1.21+ | Compiling chaincode (Fabric mode only) |
-| Fabric binaries | 2.5.0 | peer, configtxgen, cryptogen (Fabric mode only) |
+| Audit Gateway | 8000 | http://localhost:8000 |
+| API docs | 8000 | http://localhost:8000/docs |
+| PostgreSQL | 5432 | postgresql://audit:audit@localhost/auditdb |
+| Besu JSON-RPC | 8545 | http://localhost:8545 |
+| Besu WebSocket | 8546 | ws://localhost:8546 |
 
-**Install Fabric binaries (required for Fabric mode only):**
-```bash
-curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7
-export PATH=$PATH:$HOME/fabric-samples/bin
+---
+
+## Roles and Access Control
+
+Pass `X-Role: <role>` header. In production, role is derived from client TLS certificate MSP attribute.
+
+| Role | Submit | Read | Verify | Export |
+|---|---|---|---|---|
+| operator | ✓ | - | - | - |
+| safety_manager | - | ✓ | - | - |
+| inspector | - | ✓ | ✓ | ✓ |
+| insurer | - | ✓ | ✓ | - |
+
+---
+
+## What is in the event hash?
+
+Fields included in `SHA-256(canonical_json(event))`:
+
+```
+schema_version, event_type, ts, site_id, zone_id, actor_id, severity, source, payload
 ```
 
-## Quick Start - Three Modes
+Fields **excluded** from the hash:
+- `nonce` - used only for idempotent event ID generation
+- `evidence_ref` - URI set asynchronously after submission
 
-### Mode 1: Stub (no Docker, no Fabric - fastest for development)
+Any modification to any included field produces a different hash, detectable by the verifier.
 
-In-memory ledger. All application logic works. No blockchain, no consensus.
+---
 
-```bash
-make install-dev
-make up-stub
-```
+## Threat Mitigations
 
-In a second terminal:
-```bash
-make seed              # accident + near-miss + 200 normal events
-make sim-fraud         # tamper detection demo
-make dashboard         # Streamlit UI at http://localhost:8501
-```
-
-### Mode 2: Docker Compose (gateway + MinIO, still stub ledger)
-
-```bash
-make up-docker
-make seed
-make sim-fraud
-```
-
-### Mode 3: Full Hyperledger Fabric (production-equivalent)
-
-Start the permissioned blockchain network (2 orgs, 1 orderer, 2 peers, 2 CouchDB):
-
-```bash
-make fabric-up         # generate crypto material + start containers
-make fabric-deploy     # package, install, approve, commit chaincode
-make up-fabric         # start gateway connected to Fabric
-make seed
-make sim-fraud
-make sim-rate          # throughput experiment (E7)
-make export-report
-make verify-report
-```
-
-**Ports in Fabric mode:**
-
-| Service | Port | Notes |
-|---|---|---|
-| Audit Gateway | 8080 | REST API |
-| Org1 peer | 7051 | AuditGatewayMSP |
-| Org2 peer | 9051 | InspectorMSP |
-| Orderer | 7050 | RAFT ordering service |
-| CouchDB (Org1) | 5984 | `http://localhost:5984/_utils` |
-| CouchDB (Org2) | 6984 | `http://localhost:6984/_utils` |
-| MinIO | 9001 | `http://localhost:9001` |
-
-## Simulation Scenarios
-
-| Command | What it demonstrates |
+| Threat | Mechanism |
 |---|---|
-| `make sim-normal` | Routine monitoring - 200 random events |
-| `make sim-accident` | Causal chain: ZONE_ENTRY → PPE_VIOLATION → NEAR_MISS → FALL_DETECTED |
-| `make sim-near-miss` | Escalating hazard: HAZARD_ENTRY → PROXIMITY_ALERT → NEAR_MISS |
-| `make sim-fraud` | Tamper detection: submit event → alter severity → verify → FAIL |
-| `make sim-replay` | Idempotency: submit same event twice → second rejected |
-| `make sim-rate` | 10 tx/s for 60s → metrics CSV for Chapter 5 |
+| T1: Delete event from batch | Event hash absent from Merkle tree → verify FAIL |
+| T2: Tamper event payload | SHA-256 mismatch → recomputed hash ≠ stored hash → FAIL |
+| T3: Inject fake event | Injected hash changes Merkle root → anchor mismatch → FAIL |
+| T4: Reorder events | Batch window bounds in `metaHash` are immutable on-chain |
+| T5: Replay batch anchor | `storeBatchRoot` reverts on duplicate batchId (write-once) |
+| T6: Unilateral ledger write | `authorisedSubmitters` RBAC in contract; extensible to multisig |
 
-## REST API Summary
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Status, mode, schema version, signer ID |
-| `/pubkey` | GET | Gateway ECDSA public key for independent signature verification |
-| `/stats` | GET | Event counts grouped by type, severity, zone |
-| `/metrics` | GET | Latency P50/P95/P99, throughput (tx/s), error rate |
-| `/metrics/export` | POST | Write results/run_*/events.csv + metrics.csv |
-| `/events` | POST | Submit event - validate, hash, sign, record on ledger |
-| `/events/{id}` | GET | Retrieve a single on-chain event record |
-| `/events/{id}/history` | GET | Fabric write history (1 entry = no tampering) |
-| `/events/{id}/chain` | GET | Trace prevEventHash chain, detect broken links |
-| `/actors/{id}/events` | GET | Paginated actor history with time range filter |
-| `/zones/{id}/events` | GET | Paginated zone history with time range filter |
-| `/near-misses` | GET | All NEAR_MISS events (paginated) |
-| `/verify` | POST | Compare payload hash against ledger + validate signature |
-| `/audit/report` | GET | Tamper-evident audit package with package hash |
+---
 
 ## Project Structure
 
 ```
-audit-layer/
-├── README.md
+iot-blockchain-poc/
+├── docker-compose.yml
 ├── Makefile
-├── docker-compose.yml           -- app stack (gateway + MinIO)
-├── docs/
-│   ├── data-model.md            -- entity schema, on-chain vs off-chain
-│   ├── architecture.md
-│   ├── accountability-framework.md
-│   ├── threat-model.md
-│   ├── design-rationale.md
-│   ├── legal-use-cases.md
-│   ├── experiment-plan.md
-│   └── api-spec.md
-├── fabric/
-│   ├── config/
-│   │   ├── crypto-config.yaml   -- MSP and CA definitions
-│   │   └── configtx.yaml        -- channel, genesis block, endorsement policy
-│   ├── network/
-│   │   ├── docker-compose-fabric.yml  -- CA, orderer, 2 peers, 2 CouchDB, CLI
-│   │   └── network.sh           -- one-command: up / deploy / down / reset
-│   └── chaincode/
-│       └── auditcc/
-│           ├── auditcc.go       -- composite keys, ACL, pagination, TraceChain
-│           └── go.mod
-├── gateway/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── app/
-│       ├── main.py              -- all endpoints + metrics instrumentation
-│       ├── schemas.py           -- SafetyEvent schema v1.0, Pydantic models
-│       ├── fabric_client.py     -- Fabric Gateway SDK wrapper + in-memory stub
-│       ├── hashing.py           -- canonical JSON + SHA-256 hashing
-│       ├── signing.py           -- ECDSA-P256 signing + verification
-│       └── metrics.py           -- latency/throughput collection + CSV export
-├── dashboard/
-│   ├── app.py                   -- Streamlit: timeline, verify, metrics, tamper demo
-│   └── requirements.txt
-├── simulator/
-│   ├── generate_events.py       -- 5 scenarios + rate-based throughput simulation
-│   └── scenarios/
-│       └── incident_day.json
-├── tests/
-│   ├── test_hashing.py          -- canonical JSON, hash consistency, event ID
-│   └── test_signing.py          -- ECDSA round-trip, tamper detection
+├── README.md
+├── contracts/
+│   ├── AuditAnchor.sol       - write-once batch anchor (Solidity)
+│   ├── deploy.py             - Python deployer (web3.py)
+│   └── deployed.json         - address + ABI after deployment
+├── services/
+│   ├── audit-gateway/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── app/
+│   │       ├── main.py       - FastAPI: ingest, batch, verify endpoints
+│   │       ├── schemas.py    - Event schema (CANONICAL_FIELDS list)
+│   │       ├── batching.py   - Batch window builder + anchor worker
+│   │       ├── merkle.py     - Binary Merkle tree (canonical, sorted)
+│   │       ├── db.py         - PostgreSQL DAL (events, batches)
+│   │       ├── roles.py      - RBAC (operator/safety_manager/inspector/insurer)
+│   │       └── ledger/
+│   │           ├── adapter.py - Backend selector (stub/besu/fabric)
+│   │           ├── besu.py    - Besu/web3.py implementation
+│   │           └── fabric.py  - Fabric placeholder
+│   ├── iot-sim/
+│   │   ├── Dockerfile
+│   │   └── sim.py            - 5 scenarios: normal/accident/near_miss/fraud/load
+│   └── verifier/
+│       ├── Dockerfile
+│       └── verify.py         - T1/T2/T3 fraud cases + batch/event verify
 ├── scripts/
-│   ├── up.sh                    -- start app stack (stub/docker/fabric)
-│   ├── down.sh
-│   ├── seed.sh
-│   ├── export_audit_report.sh
-│   └── verify_integrity.py
+│   ├── demo.sh               - 4-scene thesis defense demo
+│   ├── run_experiment.py     - E1–E6 experiments → CSV
+│   └── collect_metrics.py    - Aggregate CSVs → Chapter 5 table
+├── docs/
+│   ├── architecture.md
+│   ├── audit-event-contract.md
+│   ├── threat-model.md
+│   └── ...
 └── results/
-    └── run_YYYYMMDD_HHMM/
+    └── E5_20241115_143022/
         ├── events.csv
-        └── metrics.csv
+        ├── metrics.csv
+        └── report.json
 ```
 
-## Security Properties
+---
 
-| Property | Mechanism |
-|---|---|
-| Immutability | Fabric append-only ledger; chaincode idempotency check rejects overwrites |
-| Non-repudiation | ECDSA-P256 signature on every event + `AND(Org1, Org2)` endorsement on every block |
-| Integrity verification | SHA-256 canonical JSON - any party recomputes and compares |
-| Identity attribution | `recordedByMSP` + `signerId` + `signerCertFingerprint` on every record |
-| Idempotency / replay protection | `eventId = SHA256(schema:actor:ts:type:zone:nonce)` - retry-safe |
-| Chain integrity | `prevEventHash` links events per actor; `TraceChain` detects broken links |
-| Pseudonymisation | `actorId` is a pseudonym; PII kept out of ledger (GDPR Art. 4(5)) |
-| Write access control | `writerMSPs` in chaincode; non-writers receive access denied error |
+## Chapter 5 Experiments
 
-## Answering the Key Banca Question
+| Exp | Name | What it measures |
+|---|---|---|
+| E1 | Functional Correctness | All fields stored correctly, idempotency |
+| E2 | Tamper Detection | 20 PASS + 20 FAIL detection rate |
+| E3 | Batch Integrity | Merkle root matches Besu anchor |
+| E4 | Incident End-to-End | 7-event chain queryability |
+| E5 | Throughput | p50/p95/p99 at configurable EPS |
+| E6 | Fraud Verification | T1/T2/T3 detection via Merkle proof |
 
-> "Why not use an append-only database with digital signatures?"
+```bash
+make exp-all EPS=10 DURATION=120
+python scripts/collect_metrics.py
+# Prints and saves results/chapter5_table.csv
+```
 
-The entity that controls a database - even an "append-only" one - can bypass application-layer constraints via direct database access, backup restoration, or administrative override. In the construction site context, the main contractor (who controls the IoT infrastructure) is the primary accountability subject after an incident.
+---
 
-A Fabric ledger with `AND(AuditGatewayMSP, InspectorMSP)` endorsement cannot be modified by either organisation acting alone. The proof is architectural, not procedural.
+## Notes on Configuration
 
-Full formal argument: `docs/design-rationale.md`
+All claimed performance numbers in the thesis should reference the experiment output in `results/` and be labelled:
 
-## Limitations
+> "Measured in simulated environment (Docker on WSL2). Real-network performance subject to validator count, block time, and network latency."
 
-- Events are simulated, not from real IoT sensors (documented in `docs/experiment-plan.md`)
-- Stub mode does not exercise Fabric consensus or endorsement policy - use `make fabric-up` for real validation
-- Chaincode-level ABAC (attribute-based access control) is MSP-level only in this prototype
-- MinIO `evidenceRef` is optional - the hash verification path is fully implemented
-
-## References
-
-- Hyperledger Fabric 2.5: https://hyperledger-fabric.readthedocs.io
-- Fabric Gateway SDK: https://hyperledger.github.io/fabric-gateway
-- ISO 45001:2018 - Occupational health and safety management systems
-- ISO/IEC 27037 - Digital evidence identification and preservation
-- EU OSH Directive 89/391/EEC
-- FastAPI: https://fastapi.tiangolo.com
-- Streamlit: https://streamlit.io
+This is standard practice and pre-empts the "you measured this in simulation" objection.

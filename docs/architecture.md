@@ -1,200 +1,186 @@
 # Architecture
 
-## System Purpose
+## System Boundary
 
-The audit layer is designed as a **multi-stakeholder accountability framework**, not a monitoring system. Its goal is to provide tamper-evident records of safety events that are credible to all parties - including the party operating the IoT infrastructure - without requiring any party to trust a single administrator.
+This system is an **audit layer**, not a monitoring system.
 
-This distinction drives every architectural decision. See `docs/accountability-framework.md` for the formal framework description and `docs/design-rationale.md` for the justification of Hyperledger Fabric over simpler alternatives.
+| In scope | Out of scope |
+|---|---|
+| Tamper-evident event recording | Real-time alerting |
+| Post-incident verification | Safety dashboards |
+| Causal chain reconstruction | Sensor data processing |
+| Integrity evidence for investigators | Worker performance tracking |
 
-## Component Overview
+The distinction is deliberate: the system minimises complexity and avoids competing with existing safety management platforms. It adds a single property those platforms lack - post-hoc tamper detectability by independent parties.
+
+---
+
+## Components
+
+### iot-sim (Python)
+
+Synthetic event generator. Simulates a construction site with:
+- 20 workers (W001–W020)
+- 8 zones (Z01–Z08) with configurable risk levels
+- 3 equipment units (EQ-CRANE-01, EQ-EXCAVATOR-02, EQ-LIFT-03)
+- 11 event types at configurable rates
+
+In a production deployment, this is replaced by the real IoT platform (MQTT broker, edge gateway, existing safety wearables).
+
+### audit-gateway (FastAPI, Python)
+
+The single entry point for event submission. Responsibilities:
+1. Schema validation (EventIngest contract)
+2. Canonical hashing: `event_hash = SHA256(canonical_json(fixed_fields))`
+3. Persistence to Postgres
+4. Batch accumulation in memory
+5. On each time window: compute Merkle root → anchor on ledger
+6. Access control (role-based, X-Role header in prototype)
+7. Access log for all read/verify operations
+
+### postgres
+
+Operational event store. Holds:
+- `events` - one row per safety event including `event_hash`
+- `batches` - one row per time window, `merkle_root`, `anchor_status`
+
+Postgres is trusted by the gateway but untrusted by the verifier - the verifier treats it as potentially adversarial (recomputes all hashes from scratch).
+
+### besu (Hyperledger Besu, CLIQUE PoA)
+
+Permissioned blockchain. Runs the `AuditAnchor.sol` contract. Stores only:
+```
+batchId → (merkleRoot, metaHash, timestamp, anchoredBy)
+```
+Write-once: the contract rejects duplicate `batchId` values. The gateway account must be in the `authorisedGateways` mapping.
+
+Why Besu over Fabric: Besu starts in a single Docker container with no certificate management. The contract interface is four functions. This reduces setup friction to zero on WSL2. The ledger adapter interface (`adapter.py`) is identical for both - switching to Fabric requires implementing `FabricAdapter`, not changing any other component.
+
+### verifier (Python)
+
+Stateless integrity checker. For each batch:
+1. Reads all events for `batch_id` from Postgres
+2. Recomputes `event_hash` for each event from stored field values
+3. Rebuilds the Merkle tree from recomputed hashes
+4. Fetches the anchored root from Besu via `getAnchor(batchId)`
+5. Compares: `recomputed_root == anchored_root` → PASS/FAIL
+
+The verifier does not trust Postgres. It treats stored `event_hash` values as untrusted caches and recomputes from raw fields.
+
+---
+
+## Data Flow
+
+### Event submission (happy path)
 
 ```
-Construction Site
-
-  Wearables           Cameras           IoT Gateway / SCADA
-  (BLE/Zigbee)        (RTSP/AI)         (existing platform)
-       |                  |                    |
-       +------------------+--------------------+
-                          |
-                   Events (HTTP / MQTT)
-                          |
-                          v
-             Audit Gateway (Python / FastAPI)
-             - Validate event schema (Pydantic)
-             - Generate deterministic event_id
-             - Compute SHA-256(canonical_payload)
-             - Submit transaction via Fabric Gateway SDK
-             - Optionally store full payload off-chain (MinIO)
-
-             REST API endpoints:
-               POST /events
-               GET  /events
-               GET  /events/{id}
-               GET  /events/{id}/history
-               POST /events/{id}/verify
-               GET  /audit/report
-               GET  /audit/package
-                          |
-                   gRPC + mutual TLS
-                          |
-                          v
-         Hyperledger Fabric 2.5 - Permissioned Ledger
-
-           Org1 (Contractor)    Org2 (Inspector/Insurer)
-             peer0                peer0
-             CouchDB              CouchDB
-
-           Orderer (RAFT consensus)
-
-           Channel: mychannel
-           Chaincode: auditcc (Go)
-           Endorsement policy: AND(Org1MSP, Org2MSP)
-                          |
-                          v
-         Off-chain Evidence Store (MinIO / S3)
-         - Full event JSON payloads
-         - Camera screenshots / video clips
-         - Sensor time-series data
-         Ledger stores: payload_hash + evidence_uri only
+IoT sensor
+  │ POST /events {event_id, ts, actor_id, site_id, zone_id,
+  │               event_type, severity, source, payload}
+  ▼
+Gateway: validate schema
+  │ event is valid
+  ▼
+Gateway: compute payload_hash = SHA256(canonical(payload))
+  │
+  ▼
+Gateway: compute event_hash = SHA256(canonical({
+           schema_version, event_id, ts, actor_id, site_id,
+           zone_id, event_type, severity, source, payload_hash}))
+  │
+  ▼
+Postgres: INSERT INTO events (event_id, ..., event_hash)
+  │
+  ▼
+BatchEngine: append to in-memory pending list
+  │ [background, every window_seconds]
+  ▼
+BatchEngine: close window
+  leaf_hashes = [e.event_hash for e in pending]
+  merkle_root = MerkleTree(leaf_hashes).root()
+  meta_hash   = SHA256(canonical({batch_id, site_id, window, count}))
+  │
+  ▼
+Besu: AuditAnchor.storeBatchRoot(batch_id, merkle_root, meta_hash, count, site_id)
+  │ tx confirmed
+  ▼
+Postgres: UPDATE batches SET anchor_status='ANCHORED', ledger_tx_id=tx_hash
 ```
 
-## Design Constraints
-
-The architecture is shaped by three non-negotiable constraints:
-
-**Low coupling:** The system must be attachable to any existing IoT safety platform without requiring that platform to be redesigned. The Gateway accepts a simple HTTP POST - the IoT platform does not need to know about Fabric.
-
-**No single point of trust:** No organisation controls the ledger unilaterally. The endorsement policy requires signatures from multiple independent organisations on every write transaction. This is the property that distinguishes the system from a conventional append-only database.
-
-**Independent verifiability:** Any party in possession of the original payload can verify any record without contacting the submitter. This is required for the records to be useful in legal and regulatory contexts.
-
-## Data Model
-
-### On-Chain Record (SafetyEvent)
-
-| Field | Type | Purpose |
-|---|---|---|
-| `event_id` | string | Deterministic SHA-256 digest of (site, actor, ts_event, type) |
-| `event_type` | enum | Classification of the safety event |
-| `ts_event` | ISO-8601 | Timestamp of the physical event (from IoT platform) |
-| `ts_ingest` | ISO-8601 | Timestamp set by the chaincode at commit time |
-| `site_id` | string | Construction site identifier |
-| `zone_id` | string | Zone within the site |
-| `actor_id` | string | Worker or equipment identifier |
-| `severity` | enum | low / medium / high / critical |
-| `source` | enum | wearable / camera / gateway / simulator / manual |
-| `payload_hash` | SHA-256 hex | Hash of the canonical JSON payload |
-| `evidence_uri` | string | Pointer to off-chain full payload (MinIO URI) |
-| `prev_event_hash` | string | Optional hash of previous event for actor chaining |
-| `tx_id` | string | Fabric transaction ID |
-| `recorded_by` | string | MSP ID of the submitting organisation |
-
-The on-chain record does not store the full payload. It stores the hash and enough metadata to query, filter, and attribute the event. This keeps the ledger lean while ensuring any tampering of off-chain data is detectable.
-
-### Canonical Payload (Off-Chain, Subject to Hashing)
-
-```json
-{
-  "event_type": "NEAR_MISS",
-  "ts_event": "2024-11-15T09:17:45+00:00",
-  "site_id": "site-torino-01",
-  "zone_id": "Z04",
-  "actor_id": "W001",
-  "severity": "high",
-  "source": "camera",
-  "payload_extra": {
-    "clearance_m": 0.4,
-    "equipment_id": "EQ-CRANE-01"
-  }
-}
-```
-
-Fields are serialised with sorted keys and no whitespace to ensure the hash is deterministic regardless of field insertion order.
-
-## Data Flows
-
-### Event Registration
+### Batch verification (post-incident)
 
 ```
-IoT Platform
-  POST /events {event_type, ts_event, actor_id, zone_id, ...}
-
-Audit Gateway
-  1. Validate schema
-  2. Generate event_id = "evt-" + SHA256(site:actor:ts:type)[0:32]
-  3. Build canonical_payload (fixed field set, sorted keys)
-  4. payload_hash = SHA256(JSON(canonical_payload))
-  5. [optional] Upload full payload to MinIO -> evidence_uri
-  6. Submit RegisterEvent(event_id, ..., payload_hash, evidence_uri)
-
-Chaincode (auditcc)
-  1. Check event_id not already in state (idempotency)
-  2. Read caller MSP ID
-  3. Write SafetyEvent to ledger state
-  4. Emit SafetyEventRecorded chaincode event
-
-Fabric Ordering Service
-  1. Order transaction into a block
-  2. Set block timestamp (independent of submitter)
-  3. Distribute block to all peers
-
-Result: immutable record with multi-org endorsement and independent timestamp
+Inspector calls: POST /verify?batch_id=<id>
+  │
+  ▼
+Gateway queries Postgres: SELECT * FROM events WHERE batch_id = ?
+  │
+  ▼
+Gateway recomputes:
+  for each event:
+    recomputed_hash = SHA256(canonical({fixed_fields}))
+    if recomputed_hash ≠ stored event_hash:
+      tampered.append(event_id)
+  recomputed_root = MerkleTree([recomputed_hashes]).root()
+  │
+  ▼
+Gateway queries Besu: AuditAnchor.getAnchor(batch_id)
+  → anchored_root
+  │
+  ▼
+if recomputed_root == anchored_root and not tampered:
+  return PASS
+else:
+  return FAIL + tampered event IDs + hash mismatch details
 ```
 
-### Integrity Verification
+---
 
+## Role-Based Access Control
+
+| Role | Submit | Read Events | Verify | Access Log |
+|---|---|---|---|---|
+| `operator` | ✓ | - | - | - |
+| `safety_manager` | - | ✓ | - | - |
+| `inspector` | - | ✓ | ✓ | ✓ |
+| `insurer` | - | ✓ | ✓ | - |
+
+All read/verify operations are logged in the access log (`GET /access-log`) with role, timestamp, path, and client IP. This addresses the governance requirement: a permissioned blockchain without access logging is just a private network.
+
+In production: replace the `X-Role` header with JWT claims (bearer token from an identity provider) or mTLS client certificate attributes mapped to roles.
+
+---
+
+## Batching: Design Rationale
+
+Writing one blockchain transaction per event at 10–100 events/s would cost:
+- 10 events/s × 5s anchor latency = 50 concurrent pending transactions
+- Gas cost scales linearly with events
+- Throughput limited by ledger commit latency (~100–2000ms per tx)
+
+With 5-second batching:
+- Maximum 2 blockchain transactions per 10 seconds regardless of event rate
+- Each transaction covers N events (N = eps × window_seconds)
+- Integrity is preserved: every event is a leaf in the Merkle tree anchored by that transaction
+- A single tampered event in a batch of 1000 is detectable
+
+The Merkle proof (`services/audit-gateway/app/merkle.py`) allows proving a single event's inclusion without revealing the full batch - relevant if some events are sensitive.
+
+---
+
+## Ledger Adapter Interface
+
+```python
+class LedgerAdapter(ABC):
+    async def anchor(batch_id, merkle_root, meta_hash, event_count, site_id) -> dict
+    async def get_anchor(batch_id) -> Optional[dict]
+    async def health() -> dict
 ```
-Auditor
-  POST /events/{event_id}/verify
-  Body: {payload_json: "<canonical JSON string>"}
 
-Audit Gateway
-  1. Compute computed_hash = SHA256(payload_json)
-  2. Retrieve stored_hash from ledger via QueryEvent
+Three implementations:
+- `StubAdapter` - in-memory dict (tests, local dev without Docker)
+- `BesuAdapter` - Hyperledger Besu via Web3.py
+- `FabricAdapter` - placeholder (not implemented)
 
-Chaincode (on-chain path, alternative)
-  1. GetState(event_id) -> stored_hash
-  2. SHA256(payload_json) == stored_hash -> "PASS" or "FAIL: ..."
-
-Result: PASS if payload matches; FAIL with both hashes if tampered
-```
-
-## Chaincode Functions
-
-| Function | Transaction Type | Description |
-|---|---|---|
-| `RegisterEvent` | Submit | Record a new safety event; rejects duplicates |
-| `QueryEvent` | Evaluate | Retrieve a single event by ID |
-| `QueryByWorker` | Evaluate | CouchDB rich query by actor_id |
-| `QueryByZone` | Evaluate | CouchDB rich query by zone_id |
-| `QueryByEventType` | Evaluate | CouchDB rich query by event_type |
-| `QueryBySeverity` | Evaluate | CouchDB rich query by severity |
-| `QueryByTimeRange` | Evaluate | CouchDB range query by ts_event |
-| `QueryByZoneAndTime` | Evaluate | Combined zone and time filter |
-| `VerifyIntegrity` | Evaluate | Hash comparison executed on-chain |
-| `GetAuditPackage` | Evaluate | Bundle with package hash for chain-of-custody |
-| `GetHistory` | Evaluate | Full Fabric write history for a key |
-
-## Access Control
-
-| Role | Organisation | Write | Read | Verify | Export |
-|---|---|:---:|:---:|:---:|:---:|
-| Audit Gateway | Org1 | yes | yes | yes | yes |
-| Safety Manager | Org1 | no | yes | yes | yes |
-| Site Inspector | Org2 | no | yes | yes | yes |
-| Insurance Adjuster | Org2 | no | yes | yes | yes |
-
-Write access is enforced by the Fabric endorsement policy - a write transaction that does not carry valid signatures from the required MSPs will not be committed. Read access is enforced at the Gateway API layer in this prototype.
-
-## Why CouchDB
-
-The Fabric state database must support rich queries (filtering by actor, zone, time range) for the audit use cases. LevelDB, the default Fabric state database, supports only key-range queries. CouchDB is required for JSON field queries. All query-heavy chaincode functions depend on CouchDB being configured when the network is started.
-
-## Related Documents
-
-- `docs/accountability-framework.md` - Formal framework description, verification protocol, accountability matrix
-- `docs/threat-model.md` - Adversary definitions, concrete threat scenarios, residual risks
-- `docs/design-rationale.md` - Formal comparison with append-only database; justification for blockchain
-- `docs/legal-use-cases.md` - Concrete forensic and legal scenarios with step-by-step procedures
-- `docs/experiment-plan.md` - Validation experiments with acceptance criteria
-- `docs/api-spec.md` - REST API reference
+Switching from Besu to Fabric: implement `FabricAdapter`, set `LEDGER_MODE=fabric`.
+No other code changes required.
