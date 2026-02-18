@@ -266,7 +266,7 @@ def run_fraud(gateway: str):
     print(f"  stored_hash : {vresp2['stored_hash'][:32]}")
     print(f"  submitted   : {vresp2['submitted_hash'][:32]}")
     print(f"  sig_valid   : {vresp2.get('signature_valid')}")
-    print("\nFraud scenario complete — tamper detected.")
+    print("\nFraud scenario complete - tamper detected.")
 
 
 def run_replay(gateway: str):
@@ -286,9 +286,9 @@ def run_replay(gateway: str):
         resp2 = submit(session, gateway, ev)
         print(f"  Unexpected acceptance: {resp2['event_id']}")
     except requests.HTTPError as exc:
-        print(f"  Rejected (expected): {exc.response.status_code} — {exc.response.text[:80]}")
+        print(f"  Rejected (expected): {exc.response.status_code} - {exc.response.text[:80]}")
 
-    print("\nReplay scenario complete — duplicate rejected by idempotency check.")
+    print("\nReplay scenario complete - duplicate rejected by idempotency check.")
 
 
 def run_rate_based(gateway: str, rate: float, duration: int):

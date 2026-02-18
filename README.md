@@ -1,15 +1,15 @@
 # Immutable Audit Layer for IoT Safety Data in Construction Sites
 
-Laurea Magistrale — Politecnico di Torino
+Laurea Magistrale - Politecnico di Torino
 
 ## What This System Is
 
-A multi-stakeholder accountability framework for construction site safety events, built on Hyperledger Fabric 2.5. It augments existing IoT safety platforms with a permissioned ledger that neither the contractor nor the inspector can alter unilaterally — because both organisations' cryptographic signatures are required on every write transaction.
+A multi-stakeholder accountability framework for construction site safety events, built on Hyperledger Fabric 2.5. It augments existing IoT safety platforms with a permissioned ledger that neither the contractor nor the inspector can alter unilaterally - because both organisations' cryptographic signatures are required on every write transaction.
 
 The system is not a monitoring platform. Its value is post-incident: providing tamper-evident records that are credible to all parties (contractor, inspector, insurer, regulator) without requiring any party to trust a single administrator.
 
 **Key question the system answers:** "Can this safety record have been modified after the incident?"  
-**Answer the ledger provides:** No — here is cryptographic proof, endorsed by both organisations.
+**Answer the ledger provides:** No - here is cryptographic proof, endorsed by both organisations.
 
 See `docs/design-rationale.md` for the formal comparison with append-only databases and digital signatures.
 
@@ -68,9 +68,9 @@ curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7
 export PATH=$PATH:$HOME/fabric-samples/bin
 ```
 
-## Quick Start — Three Modes
+## Quick Start - Three Modes
 
-### Mode 1: Stub (no Docker, no Fabric — fastest for development)
+### Mode 1: Stub (no Docker, no Fabric - fastest for development)
 
 In-memory ledger. All application logic works. No blockchain, no consensus.
 
@@ -125,7 +125,7 @@ make verify-report
 
 | Command | What it demonstrates |
 |---|---|
-| `make sim-normal` | Routine monitoring — 200 random events |
+| `make sim-normal` | Routine monitoring - 200 random events |
 | `make sim-accident` | Causal chain: ZONE_ENTRY → PPE_VIOLATION → NEAR_MISS → FALL_DETECTED |
 | `make sim-near-miss` | Escalating hazard: HAZARD_ENTRY → PROXIMITY_ALERT → NEAR_MISS |
 | `make sim-fraud` | Tamper detection: submit event → alter severity → verify → FAIL |
@@ -141,7 +141,7 @@ make verify-report
 | `/stats` | GET | Event counts grouped by type, severity, zone |
 | `/metrics` | GET | Latency P50/P95/P99, throughput (tx/s), error rate |
 | `/metrics/export` | POST | Write results/run_*/events.csv + metrics.csv |
-| `/events` | POST | Submit event — validate, hash, sign, record on ledger |
+| `/events` | POST | Submit event - validate, hash, sign, record on ledger |
 | `/events/{id}` | GET | Retrieve a single on-chain event record |
 | `/events/{id}/history` | GET | Fabric write history (1 entry = no tampering) |
 | `/events/{id}/chain` | GET | Trace prevEventHash chain, detect broken links |
@@ -216,9 +216,9 @@ audit-layer/
 |---|---|
 | Immutability | Fabric append-only ledger; chaincode idempotency check rejects overwrites |
 | Non-repudiation | ECDSA-P256 signature on every event + `AND(Org1, Org2)` endorsement on every block |
-| Integrity verification | SHA-256 canonical JSON — any party recomputes and compares |
+| Integrity verification | SHA-256 canonical JSON - any party recomputes and compares |
 | Identity attribution | `recordedByMSP` + `signerId` + `signerCertFingerprint` on every record |
-| Idempotency / replay protection | `eventId = SHA256(schema:actor:ts:type:zone:nonce)` — retry-safe |
+| Idempotency / replay protection | `eventId = SHA256(schema:actor:ts:type:zone:nonce)` - retry-safe |
 | Chain integrity | `prevEventHash` links events per actor; `TraceChain` detects broken links |
 | Pseudonymisation | `actorId` is a pseudonym; PII kept out of ledger (GDPR Art. 4(5)) |
 | Write access control | `writerMSPs` in chaincode; non-writers receive access denied error |
@@ -227,7 +227,7 @@ audit-layer/
 
 > "Why not use an append-only database with digital signatures?"
 
-The entity that controls a database — even an "append-only" one — can bypass application-layer constraints via direct database access, backup restoration, or administrative override. In the construction site context, the main contractor (who controls the IoT infrastructure) is the primary accountability subject after an incident.
+The entity that controls a database - even an "append-only" one - can bypass application-layer constraints via direct database access, backup restoration, or administrative override. In the construction site context, the main contractor (who controls the IoT infrastructure) is the primary accountability subject after an incident.
 
 A Fabric ledger with `AND(AuditGatewayMSP, InspectorMSP)` endorsement cannot be modified by either organisation acting alone. The proof is architectural, not procedural.
 
@@ -236,16 +236,16 @@ Full formal argument: `docs/design-rationale.md`
 ## Limitations
 
 - Events are simulated, not from real IoT sensors (documented in `docs/experiment-plan.md`)
-- Stub mode does not exercise Fabric consensus or endorsement policy — use `make fabric-up` for real validation
+- Stub mode does not exercise Fabric consensus or endorsement policy - use `make fabric-up` for real validation
 - Chaincode-level ABAC (attribute-based access control) is MSP-level only in this prototype
-- MinIO `evidenceRef` is optional — the hash verification path is fully implemented
+- MinIO `evidenceRef` is optional - the hash verification path is fully implemented
 
 ## References
 
 - Hyperledger Fabric 2.5: https://hyperledger-fabric.readthedocs.io
 - Fabric Gateway SDK: https://hyperledger.github.io/fabric-gateway
-- ISO 45001:2018 — Occupational health and safety management systems
-- ISO/IEC 27037 — Digital evidence identification and preservation
+- ISO 45001:2018 - Occupational health and safety management systems
+- ISO/IEC 27037 - Digital evidence identification and preservation
 - EU OSH Directive 89/391/EEC
 - FastAPI: https://fastapi.tiangolo.com
 - Streamlit: https://streamlit.io

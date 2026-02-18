@@ -35,7 +35,7 @@ class Source(str, Enum):
 class RegisterEventRequest(BaseModel):
     """Inbound event from the IoT platform or simulator.
 
-    actorId is treated as a pseudonym — no PII should be stored here.
+    actorId is treated as a pseudonym - no PII should be stored here.
     Sensitive context goes in payload_extra, which is hashed and stored off-chain.
     """
     event_type: EventType
@@ -51,7 +51,7 @@ class RegisterEventRequest(BaseModel):
                                            description="payloadHash of previous event in the actor chain")
     nonce: Optional[str] = Field(default="", description="Random value to ensure eventId uniqueness on retry")
     payload_extra: Optional[dict] = Field(default=None,
-                                          description="Additional sensor data — stored off-chain and hashed")
+                                          description="Additional sensor data - stored off-chain and hashed")
 
     @field_validator("ts")
     @classmethod

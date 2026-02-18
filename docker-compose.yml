@@ -4,8 +4,8 @@ version: "3.9"
 # For the full Fabric network see fabric/network/docker-compose-fabric.yml.
 #
 # Modes:
-#   Stub (default):  FABRIC_STUB_MODE=true  — in-memory ledger, no Fabric required
-#   Fabric:          FABRIC_STUB_MODE=false  — connects to fabric/network/ containers
+#   Stub (default):  FABRIC_STUB_MODE=true  - in-memory ledger, no Fabric required
+#   Fabric:          FABRIC_STUB_MODE=false  - connects to fabric/network/ containers
 #
 # Quick start (stub mode):
 #   docker compose up --build

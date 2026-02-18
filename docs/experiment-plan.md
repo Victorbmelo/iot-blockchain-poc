@@ -7,7 +7,7 @@
 
 The experiments validate the prototype against the functional requirements (RF1–RF6) and non-functional requirements (RNF1–RNF6). The focus is on correctness, integrity, and auditability. No throughput benchmark is claimed.
 
-## E1 — Functional Correctness: Event Registration
+## E1 - Functional Correctness: Event Registration
 
 **Requirements covered:** RF1, RF2
 
@@ -24,7 +24,7 @@ The experiments validate the prototype against the functional requirements (RF1�
 - 10/10 hashes match the locally computed value.
 - Duplicate submission returns an error.
 
-## E2 — Integrity Verification: PASS/FAIL Detection
+## E2 - Integrity Verification: PASS/FAIL Detection
 
 **Requirements covered:** RF5
 
@@ -32,9 +32,9 @@ The experiments validate the prototype against the functional requirements (RF1�
 
 **Procedure:**
 1. Submit 20 events with known payloads and record the canonical JSON for each.
-2. Verify all 20 events with their original payloads — expect PASS for all.
+2. Verify all 20 events with their original payloads - expect PASS for all.
 3. Modify a field in 10 of the payloads (e.g., change `severity: "high"` to `"low"`).
-4. Verify the 10 modified payloads — expect FAIL for all.
+4. Verify the 10 modified payloads - expect FAIL for all.
 
 **Expected results:**
 
@@ -50,7 +50,7 @@ The experiments validate the prototype against the functional requirements (RF1�
 - 20/20 original payloads: PASS.
 - 10/10 tampered payloads: FAIL (zero false negatives).
 
-## E3 — Query Correctness
+## E3 - Query Correctness
 
 **Requirements covered:** RF3
 
@@ -69,7 +69,7 @@ The experiments validate the prototype against the functional requirements (RF1�
 
 **Acceptance criteria:** 100% correctness for all queries.
 
-## E4 — Incident Scenario End-to-End
+## E4 - Incident Scenario End-to-End
 
 **Requirements covered:** UC2 (post-incident audit)
 
@@ -89,7 +89,7 @@ The experiments validate the prototype against the functional requirements (RF1�
 - All integrity verifications pass.
 - Audit report exportable as self-contained JSON.
 
-## E5 — Non-Repudiation: Tamper Evidence (Key Demo)
+## E5 - Non-Repudiation: Tamper Evidence (Key Demo)
 
 **Requirements covered:** UC3 (dispute resolution)
 
@@ -104,10 +104,10 @@ make demo-tamper
 **Manual steps:**
 1. Submit event E with `severity="high"`. Record `event_id` and `payload_hash`.
 2. Store the canonical payload as `original.json`.
-3. Modify `original.json` — change `severity` to `"low"`.
-4. Call `POST /events/{event_id}/verify` with `original.json` — expect PASS.
-5. Call `POST /events/{event_id}/verify` with the modified payload — expect FAIL.
-6. Call `GET /events/{event_id}/history` — confirm only one write transaction exists.
+3. Modify `original.json` - change `severity` to `"low"`.
+4. Call `POST /events/{event_id}/verify` with `original.json` - expect PASS.
+5. Call `POST /events/{event_id}/verify` with the modified payload - expect FAIL.
+6. Call `GET /events/{event_id}/history` - confirm only one write transaction exists.
 
 **Expected output:**
 
@@ -121,7 +121,7 @@ make demo-tamper
     computed    : ba7816bf8f01cfea414140de5dae2268...
 ```
 
-## E6 — Batch Audit Report Integrity
+## E6 - Batch Audit Report Integrity
 
 **Requirements covered:** RF4
 
@@ -129,15 +129,15 @@ make demo-tamper
 
 **Procedure:**
 1. Seed 200 events and export an audit report.
-2. Run `make verify-report` — expect 200 PASS results.
+2. Run `make verify-report` - expect 200 PASS results.
 3. Manually modify 5 events in the exported JSON.
-4. Re-run the verifier — expect 5 FAIL results and 195 PASS results.
+4. Re-run the verifier - expect 5 FAIL results and 195 PASS results.
 
 **Metric:** Tamper detection rate = (correctly identified tampered events / total tampered) × 100%
 
 **Acceptance criteria:** 100% detection rate.
 
-## E7 — Access Control Validation
+## E7 - Access Control Validation
 
 **Requirements covered:** RF6
 
@@ -146,7 +146,7 @@ make demo-tamper
 **Procedure:**
 1. Attempt to submit an event using an Org2 identity (read-only role).
 2. Confirm that the chaincode returns an endorsement policy failure.
-3. Submit the same event using the Org1 identity (Audit Gateway) — confirm success.
+3. Submit the same event using the Org1 identity (Audit Gateway) - confirm success.
 
 In stub mode this experiment is out of scope and documented as a limitation.
 
@@ -187,4 +187,4 @@ make verify-report
 - Event data is simulated and not from real construction site sensors.
 - Throughput at scale is not benchmarked.
 - Stub mode does not test real Fabric consensus or endorsement policy.
-- Off-chain MinIO integration is partial — `evidence_uri` is optional in the prototype.
+- Off-chain MinIO integration is partial - `evidence_uri` is optional in the prototype.

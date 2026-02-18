@@ -109,7 +109,7 @@ Request body:
 }
 ```
 
-Response — match:
+Response - match:
 
 ```json
 {
@@ -121,7 +121,7 @@ Response — match:
 }
 ```
 
-Response — mismatch (tamper detected):
+Response - mismatch (tamper detected):
 
 ```json
 {
@@ -168,5 +168,5 @@ curl "http://localhost:8080/audit/package?filter_type=zone_id&filter_value=Z04"
 | 201 | Event recorded |
 | 200 | Success |
 | 404 | Event not found |
-| 422 | Validation error — invalid schema |
+| 422 | Validation error - invalid schema |
 | 502 | Fabric communication error |

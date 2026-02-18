@@ -52,18 +52,18 @@ In the prototype, a simpler `AND("Org1MSP", "Org2MSP")` policy is used for clari
 | Read any event | Any enrolled organisation | External parties |
 | Modify an existing event | **Nobody** | Including the submitter |
 | Delete an event | **Nobody** | Including network admins |
-| Export an audit report | Any enrolled organisation | — |
-| Verify integrity | Any party with the original payload | — |
+| Export an audit report | Any enrolled organisation | - |
+| Verify integrity | Any party with the original payload | - |
 
-The "nobody" rows are not a policy decision — they are a technical property of the Fabric ledger. There is no administrative command that rewrites committed blocks.
+The "nobody" rows are not a policy decision - they are a technical property of the Fabric ledger. There is no administrative command that rewrites committed blocks.
 
 ## Verification Protocol
 
 The verification protocol defines the steps a third party must follow to independently confirm the authenticity and integrity of an audit record. This protocol is designed to be executable without trusting any single participant.
 
-### Step 1 — Retrieve the on-chain record
+### Step 1 - Retrieve the on-chain record
 
-Query the ledger for the event by ID. This can be done through any organisation's peer node — the record will be identical regardless of which peer is queried, because all peers hold the same ledger state.
+Query the ledger for the event by ID. This can be done through any organisation's peer node - the record will be identical regardless of which peer is queried, because all peers hold the same ledger state.
 
 ```bash
 curl "http://gateway/events/{event_id}"
@@ -71,11 +71,11 @@ curl "http://gateway/events/{event_id}"
 
 Record the following fields: `payload_hash`, `tx_id`, `ts_ingest`, `recorded_by`.
 
-### Step 2 — Obtain the original payload
+### Step 2 - Obtain the original payload
 
-Request the original payload from the off-chain evidence store (MinIO), or from the submitting organisation's records, or from the IoT platform's own logs. The source of the original payload does not matter — what matters is that any authentic copy will produce the same hash.
+Request the original payload from the off-chain evidence store (MinIO), or from the submitting organisation's records, or from the IoT platform's own logs. The source of the original payload does not matter - what matters is that any authentic copy will produce the same hash.
 
-### Step 3 — Recompute the hash independently
+### Step 3 - Recompute the hash independently
 
 Using any SHA-256 implementation and the canonical JSON serialisation rule (keys sorted alphabetically, no extra whitespace):
 
@@ -86,17 +86,17 @@ canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 computed_hash = hashlib.sha256(canonical.encode()).hexdigest()
 ```
 
-### Step 4 — Compare hashes
+### Step 4 - Compare hashes
 
 If `computed_hash == stored payload_hash`, the payload is authentic and unmodified.
 
-If they differ, the payload has been modified since submission. The stored hash on the ledger is the authoritative value — it was committed by the endorsing organisations at submission time.
+If they differ, the payload has been modified since submission. The stored hash on the ledger is the authoritative value - it was committed by the endorsing organisations at submission time.
 
-### Step 5 — Verify the transaction timestamp
+### Step 5 - Verify the transaction timestamp
 
 The `tx_id` can be looked up in the Fabric block explorer to confirm the block timestamp, the endorsing organisations, and the block position. This provides independent confirmation of when the event was recorded.
 
-### Step 6 — Check write history
+### Step 6 - Check write history
 
 ```bash
 curl "http://gateway/events/{event_id}/history"

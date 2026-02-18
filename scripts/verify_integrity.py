@@ -80,9 +80,9 @@ def batch_verify(gateway_url: str, report_path: str) -> bool:
 
     print(f"\nPASS: {passed}  FAIL: {failed}  TOTAL: {len(events)}")
     if failed == 0:
-        print("All events verified — audit chain intact.")
+        print("All events verified - audit chain intact.")
     else:
-        print(f"{failed} event(s) failed — tampering suspected.")
+        print(f"{failed} event(s) failed - tampering suspected.")
     return failed == 0
 
 

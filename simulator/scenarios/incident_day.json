@@ -1,5 +1,5 @@
 {
-  "name": "Incident Day — Construction Site Torino",
+  "name": "Incident Day - Construction Site Torino",
   "description": "Simulates a realistic incident day: normal operations, escalating alerts, a near-miss and a fall detection in the crane zone. Ideal for banca demo.",
   "site_id": "site-torino-01",
   "date": "2024-11-15",

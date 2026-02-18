@@ -2,7 +2,7 @@
 
 ## Overview
 
-The data model separates what goes on-chain (minimal, immutable, hashable) from what stays off-chain (full sensor payload, evidence files). This separation is a deliberate design choice: the Fabric ledger is not an event store — it is a tamper-evident witness registry.
+The data model separates what goes on-chain (minimal, immutable, hashable) from what stays off-chain (full sensor payload, evidence files). This separation is a deliberate design choice: the Fabric ledger is not an event store - it is a tamper-evident witness registry.
 
 ## Entities
 
@@ -35,7 +35,7 @@ A named area within the construction site with an associated risk level.
 
 The core entity. The on-chain record contains metadata and the hash. The full payload is stored off-chain.
 
-#### On-Chain Fields (Ledger — immutable after commit)
+#### On-Chain Fields (Ledger - immutable after commit)
 
 | Field | Type | Size | Description |
 |---|---|---|---|
@@ -60,7 +60,7 @@ The core entity. The on-chain record contains metadata and the hash. The full pa
 
 Typical on-chain record size: ~700 B per event.
 
-#### Off-Chain Fields (MinIO — hashed, not immutable)
+#### Off-Chain Fields (MinIO - hashed, not immutable)
 
 | Field | Type | Description |
 |---|---|---|
@@ -74,7 +74,7 @@ Typical on-chain record size: ~700 B per event.
 | `source` | string | Must match on-chain source |
 | `payload_extra` | object | Sensor-specific data (see examples below) |
 
-The SHA-256 of the canonical JSON serialisation of these fields (sorted keys, no whitespace) must equal `payloadHash` on-chain. Any modification to any field — including `payload_extra` — will cause verification to fail.
+The SHA-256 of the canonical JSON serialisation of these fields (sorted keys, no whitespace) must equal `payloadHash` on-chain. Any modification to any field - including `payload_extra` - will cause verification to fail.
 
 ### EvidenceRecord (off-chain, MinIO)
 
@@ -148,7 +148,7 @@ What the ledger does not guarantee:
 - That the sensor data itself was accurate (sensor spoofing is out of scope)
 - That the `ts` field reflects the true event time (it comes from the IoT platform clock)
 
-## Payload Extra — Examples by Event Type
+## Payload Extra - Examples by Event Type
 
 ### FALL_DETECTED
 ```json
@@ -212,4 +212,4 @@ These indexes enable O(log n) range scans rather than O(n) full ledger scans, wh
 | MinIO payload (off-chain) | ~2–10 KB | ~20–100 MB |
 | MinIO evidence media | 0–10 MB | 0–100 GB |
 
-The ledger footprint is deliberately small. The Fabric ledger is not designed for large binary payloads — only the tamper-evident metadata and hashes reside there.
+The ledger footprint is deliberately small. The Fabric ledger is not designed for large binary payloads - only the tamper-evident metadata and hashes reside there.

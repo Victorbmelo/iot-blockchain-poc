@@ -134,5 +134,5 @@ class MetricsCollector:
         return self._run_id
 
 
-# Module-level singleton — shared across the gateway process.
+# Module-level singleton - shared across the gateway process.
 collector = MetricsCollector(results_dir=os.getenv("RESULTS_DIR", "results"))

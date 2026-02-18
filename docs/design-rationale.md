@@ -26,7 +26,7 @@ This is sufficient when there is a single trusted administrator and all parties 
 
 An append-only database is only as trustworthy as its administrator. In the construction site context:
 
-- The database is typically operated by the **main contractor** — the party with the strongest incentive to suppress evidence of negligence after an incident.
+- The database is typically operated by the **main contractor** - the party with the strongest incentive to suppress evidence of negligence after an incident.
 - The contractor's system administrator can disable the append-only constraint, modify records directly at the database level, or restore the database from a backup that predates an inconvenient event.
 - A digital signature proves the record originated from a specific key. It does not prevent the key owner from signing a replacement record after deleting the original.
 
@@ -42,7 +42,7 @@ To verify independently, they would need:
 
 ### Problem 3: No Non-Repudiation Across Parties
 
-Non-repudiation requires that neither party can deny having participated in a transaction. A digital signature on a single-party database proves the record was signed by a specific key — but it does not prevent that party from claiming the signature was forged or the timestamp was wrong, because no independent party witnessed the transaction.
+Non-repudiation requires that neither party can deny having participated in a transaction. A digital signature on a single-party database proves the record was signed by a specific key - but it does not prevent that party from claiming the signature was forged or the timestamp was wrong, because no independent party witnessed the transaction.
 
 ## What Hyperledger Fabric Adds
 
@@ -53,8 +53,8 @@ Fabric addresses each of these gaps directly:
 Every transaction must be endorsed by a configurable set of organisations before it is committed to the ledger. In this system, both Org1 (contractor) and Org2 (inspector/insurer) must sign each write transaction.
 
 This means:
-- The contractor cannot silently insert or modify records — the inspector's peer must endorse it.
-- The inspector cannot fabricate records and blame the contractor — the contractor's peer must also have signed.
+- The contractor cannot silently insert or modify records - the inspector's peer must endorse it.
+- The inspector cannot fabricate records and blame the contractor - the contractor's peer must also have signed.
 - Neither party can unilaterally rewrite history.
 
 **The property this provides:** Mutual non-repudiation. Both parties' signatures are required, and both parties' signatures are on record.
@@ -80,7 +80,7 @@ Any party with read access to the ledger can independently verify:
 - That the payload hash matches the original data
 - That no subsequent write has modified the record (write history returns a single entry)
 
-This verification requires no trust in any single party — it is a mathematical property of the ledger structure.
+This verification requires no trust in any single party - it is a mathematical property of the ledger structure.
 
 ## Formal Comparison
 
@@ -88,10 +88,10 @@ This verification requires no trust in any single party — it is a mathematical
 |---|---|---|
 | Record integrity | Yes (hash + signature) | Yes (hash + multi-signature) |
 | Tamper detection | Yes, if the signature is checked | Yes, verifiable by any party |
-| Single administrator risk | **No** — admin can bypass | **Yes** — no single admin controls all copies |
-| Independent verification | **No** — requires trusting the exporter | **Yes** — any org can verify independently |
-| Non-repudiation | Partial — one party's signature | **Yes** — all endorsing orgs signed |
-| Shared state across distrusting parties | **No** — each party has their own copy | **Yes** — consensus-agreed shared ledger |
+| Single administrator risk | **No** - admin can bypass | **Yes** - no single admin controls all copies |
+| Independent verification | **No** - requires trusting the exporter | **Yes** - any org can verify independently |
+| Non-repudiation | Partial - one party's signature | **Yes** - all endorsing orgs signed |
+| Shared state across distrusting parties | **No** - each party has their own copy | **Yes** - consensus-agreed shared ledger |
 | Retroactive modification | Technically possible by admin | Computationally infeasible |
 | Evidence admissibility | Requires trust in a third party | Self-evidencing with cryptographic proof |
 

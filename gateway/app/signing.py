@@ -44,8 +44,8 @@ def sign_payload_hash(payload_hash: str) -> str:
     """Sign the payload hash with the gateway private key.
 
     Returns a base64-encoded DER signature.
-    The verifier needs only the payload_hash and the public key — not the
-    original payload — to confirm the signature.
+    The verifier needs only the payload_hash and the public key - not the
+    original payload - to confirm the signature.
     """
     der_sig = _private_key.sign(
         payload_hash.encode("utf-8"),

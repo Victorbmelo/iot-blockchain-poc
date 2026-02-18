@@ -15,7 +15,7 @@ try:
     SDK_AVAILABLE = True
 except ImportError:
     SDK_AVAILABLE = False
-    log.warning("Fabric Gateway SDK not installed — running in stub mode")
+    log.warning("Fabric Gateway SDK not installed - running in stub mode")
 
 PEER_ENDPOINT = os.getenv("FABRIC_PEER_ENDPOINT", "localhost:7051")
 PEER_TLS_CERT = os.getenv("FABRIC_PEER_TLS_CERT", "/certs/peer-tls.pem")
@@ -46,7 +46,7 @@ class FabricClient:
     def _connect(self):
         tls_cert_path = Path(PEER_TLS_CERT)
         if not tls_cert_path.exists():
-            log.warning("TLS cert not found at %s — falling back to stub mode", PEER_TLS_CERT)
+            log.warning("TLS cert not found at %s - falling back to stub mode", PEER_TLS_CERT)
             self._stub = True
             return
 

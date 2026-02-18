@@ -2,7 +2,7 @@
 # Start the Audit Layer application stack.
 #
 # Modes:
-#   --stub    Gateway with in-memory ledger (default — no Docker, no Fabric)
+#   --stub    Gateway with in-memory ledger (default - no Docker, no Fabric)
 #   --docker  Gateway + MinIO via Docker Compose, in-memory stub
 #   --fabric  Gateway + MinIO via Docker Compose, connected to real Fabric network
 #

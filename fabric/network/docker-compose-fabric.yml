@@ -3,8 +3,8 @@ version: "3.9"
 # Hyperledger Fabric 2.5 network for the Audit Layer prototype.
 #
 # Organisations:
-#   Org1 (AuditGatewayMSP) — operates the IoT Gateway, submits events (writer)
-#   Org2 (InspectorMSP)    — site inspector / insurer, read-only peer (endorser)
+#   Org1 (AuditGatewayMSP) - operates the IoT Gateway, submits events (writer)
+#   Org2 (InspectorMSP)    - site inspector / insurer, read-only peer (endorser)
 #
 # Endorsement policy: AND(AuditGatewayMSP.peer, InspectorMSP.peer)
 # This means neither organisation can alter the ledger without the other's signature.
@@ -37,7 +37,7 @@ volumes:
 
 services:
 
-  # Certificate Authority — Org1
+  # Certificate Authority - Org1
   ca.org1.audit.local:
     image: hyperledger/fabric-ca:1.5
     container_name: ca.org1.audit.local
@@ -53,7 +53,7 @@ services:
     networks:
       - audit_fabric
 
-  # Certificate Authority — Org2
+  # Certificate Authority - Org2
   ca.org2.audit.local:
     image: hyperledger/fabric-ca:1.5
     container_name: ca.org2.audit.local
@@ -69,7 +69,7 @@ services:
     networks:
       - audit_fabric
 
-  # Orderer — RAFT single node
+  # Orderer - RAFT single node
   orderer0.orderer.audit.local:
     image: hyperledger/fabric-orderer:2.5
     container_name: orderer0.orderer.audit.local
@@ -118,7 +118,7 @@ services:
     networks:
       - audit_fabric
 
-  # Org1 peer — AuditGatewayMSP (writer)
+  # Org1 peer - AuditGatewayMSP (writer)
   peer0.org1.audit.local:
     <<: *fabric-base
     container_name: peer0.org1.audit.local
@@ -174,7 +174,7 @@ services:
     networks:
       - audit_fabric
 
-  # Org2 peer — InspectorMSP (read + endorser)
+  # Org2 peer - InspectorMSP (read + endorser)
   peer0.org2.audit.local:
     <<: *fabric-base
     container_name: peer0.org2.audit.local
@@ -216,7 +216,7 @@ services:
     networks:
       - audit_fabric
 
-  # CLI — admin container for channel creation and chaincode lifecycle
+  # CLI - admin container for channel creation and chaincode lifecycle
   cli:
     image: hyperledger/fabric-tools:2.5
     container_name: audit_cli

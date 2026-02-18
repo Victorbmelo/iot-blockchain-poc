@@ -1,136 +1,188 @@
 # Threat Model
 
-## Purpose
+## Scope
 
-This document defines the threat model for the Immutable Audit Layer. It identifies who the adversaries are, what assets are being protected, what concrete threats are addressed, and what is explicitly out of scope. A clear threat model is a prerequisite for any security claim made in this thesis.
+This threat model covers the Immutable Audit Layer prototype for construction site safety data. Each threat is defined with a concrete attack vector, the system component that mitigates it, and how to verify the mitigation holds.
 
-## Assets
+Out of scope: sensor spoofing (hardware-level attack), key compromise before deployment, network-layer denial-of-service.
 
-The following assets require protection:
+---
 
-| Asset | Description | Value |
-|---|---|---|
-| Safety event record | The on-chain record of a safety incident | Primary — basis of legal accountability |
-| Payload integrity | The guarantee that a stored payload was not modified after submission | Primary — required for non-repudiation |
-| Submission timestamp | The time at which an event was recorded by the ledger | High — determines legal timeline |
-| Submitter identity | The MSP identity of the organisation that submitted a record | High — required for attribution |
-| Audit report | The exported bundle of events used in investigation | High — forensic evidence |
+## Actors
 
-## Trust Boundaries
+| Actor | Role | Trust Level | Controls |
+|---|---|---|---|
+| **Contractor** | Main contractor; operates the IoT platform and gateway | Untrusted post-incident | IoT platform, gateway process, network |
+| **Safety Inspector** | Regulatory body representative | Trusted | Org2 peer, their own queries |
+| **Insurer** | Insurance adjuster | Trusted (read-only) | Audit package received from inspector |
+| **Regulator** | External authority | Trusted (read-only) | Independent peer (optional) |
 
-The system operates across three distinct trust zones:
+---
 
-**Zone 1 — Trusted at submission time**  
-The Audit Gateway and the IoT platform feeding it. Within this zone, events are assumed to arrive with correct metadata. The ledger cannot verify whether the sensor data itself is accurate — only that what was submitted was not later modified.
+## Threats and Mitigations
 
-**Zone 2 — Mutually distrusted**  
-The organisations participating in the Fabric network (contractor, inspector, insurer). No single organisation is trusted by the others. The ledger is the shared source of truth precisely because it requires multi-party endorsement.
+### T1: Malicious deletion of a safety event
 
-**Zone 3 — Untrusted**  
-External parties with no Fabric identity: attackers, unauthenticated API clients, and anyone attempting to query without a valid certificate.
+**Threat**: After an incident, the contractor deletes the FALL_DETECTED or NEAR_MISS event that would establish liability.
 
-## Adversary Model
+**Attack vector**: Direct database access (conventional log system), or social engineering of the platform administrator.
 
-### Adversary A1 — Malicious Contractor (Insider)
+**Mitigation**: Hyperledger Fabric uses an append-only ledger. Once a transaction is committed, it cannot be deleted - at the protocol level, not just the application level. Even the orderer cannot remove blocks retroactively.
 
-**Who:** The main contractor whose worker caused an incident. They have write access to the IoT platform and possibly to the Audit Gateway.
+**Implementation reference**:
+- `fabric/network/docker-compose-fabric.yml` - ledger stored in peer volume, not in gateway
+- Chaincode `RegisterEvent()` - only writes, never deletes
+- `GetHistory()` chaincode function - returns full write history; zero delete entries is verifiable
 
-**Motivation:** Avoid legal liability by modifying, deleting, or backdating event records after an incident.
+**Verification command**:
+```bash
+# Verify no delete entries in history
+curl http://localhost:8080/events/<event_id>/history
+# Expected: array with isDelete=false for all entries
+```
 
-**Capabilities:**
-- Full administrative access to the IoT monitoring platform
-- Ability to modify the IoT database before the event reaches the ledger
-- Ability to tamper with off-chain evidence files (MinIO)
-- No direct access to the Fabric ledger after the Gateway MSP cert is issued
+**Residual risk**: If all peer nodes are compromised simultaneously (requires collusion of both organisations) and the ledger files are directly modified. Mitigated in production by independent infrastructure for each org.
 
-**What they can do:**
-- Modify off-chain payload files after submission
-- Attempt to re-submit a modified event with the same ID (replay with altered data)
-- Attempt to delete or overwrite on-chain records
+---
 
-**What the system prevents:**
-- Re-submission of a modified event with the same ID is rejected (idempotency check)
-- On-chain records cannot be deleted or overwritten — Fabric is append-only
-- Off-chain payload tampering is detected by `VerifyIntegrity` (hash mismatch)
+### T2: Payload tampering after submission
 
-**Residual risk:** If the contractor tampers with the IoT platform *before* the Gateway submits the event, the ledger records a false event. Mitigation: deployment requires the Gateway to be operated by a neutral party (e.g., the insurer or a third-party auditor), not the contractor.
+**Threat**: The contractor modifies the payload of a submitted event to reduce severity (e.g. FALL_DETECTED severity 5 → severity 1) or change the event type.
 
-### Adversary A2 — Malicious Platform Administrator
+**Attack vector**: Modify the off-chain payload in MinIO, or forge a new payload with a modified field.
 
-**Who:** An IT administrator who controls the server running the Audit Gateway or the IoT platform database.
+**Mitigation**: The SHA-256 hash of the canonical payload is stored on-chain as `payloadHash`. Any modification to any field in the payload produces a different hash, which is detected immediately on verification.
 
-**Motivation:** Suppress evidence of negligence or receive a bribe from the contractor.
+**Implementation reference**:
+- `gateway/app/hashing.py` - `canonical_json()` + `compute_payload_hash()`
+- `gateway/app/main.py` - hash computed before submission, never after
+- `fabric/chaincode/auditcc/auditcc.go` - `VerifyEvent()` function
+- `gateway/app/main.py` - `/verify` endpoint
 
-**Capabilities:**
-- Root access to the Gateway server
-- Ability to modify the off-chain evidence store (MinIO)
-- Access to Gateway private keys (if key management is poor)
+**Verification command**:
+```bash
+# Submit event, then verify with tampered hash
+make sim-fraud
+# Expected output: FAIL: stored=... submitted=...
+```
 
-**What they can do:**
-- Modify or delete off-chain payload files
-- Attempt to forge a new on-chain record (requires valid MSP cert)
+**Residual risk**: If the attacker can also modify the on-chain `payloadHash` - requires compromising both Org1 and Org2 endorsement simultaneously.
 
-**What the system prevents:**
-- Off-chain modification is detected by hash verification
-- On-chain records cannot be retroactively altered, even with the Gateway private key
-- The Fabric endorsement policy requires signatures from multiple organisations — a single compromised Gateway key is insufficient to alter existing records
+---
 
-**Residual risk:** A compromised Gateway key could submit new fraudulent events. Mitigation: Gateway certificate rotation and anomaly detection on submission patterns (out of scope for prototype).
+### T3: Event reordering or timeline manipulation
 
-### Adversary A3 — Colluding Organisations
+**Threat**: The contractor reorders events to make a PPE_VIOLATION appear to happen after a FALL_DETECTED (reversing the causal chain), or inserts a fabricated event at an earlier timestamp.
 
-**Who:** Two or more Fabric network participants (e.g., contractor + insurer) acting together.
+**Attack vector**: Modifying `ts` field of a submitted event, or submitting a backdated event with a forged timestamp.
 
-**Motivation:** Jointly suppress or alter evidence to avoid liability.
+**Mitigations**:
+1. `tsLedger` - set by the chaincode at block commit time, not by the submitter. An attacker can forge `ts` (the source timestamp) but cannot forge `tsLedger`.
+2. `prevEventHash` - each event references the `payloadHash` of the previous event in the actor chain. Reordering breaks the chain, which `TraceChain` detects.
+3. Fabric transaction ordering - the RAFT orderer assigns a global ordering to all transactions; this ordering cannot be retroactively changed.
 
-**Capabilities:**
-- Control over their respective peer nodes
-- Ability to attempt to fork the channel state
+**Implementation reference**:
+- `auditcc.go` - `TsLedger: time.Now().UTC().Format(time.RFC3339)` (line in `RegisterEvent`)
+- `auditcc.go` - `TraceChain()` function
+- `simulator/generate_events.py` - `run_accident()` sets `prev_event_hash` for each link
 
-**What the system prevents:**
-- Fabric's RAFT-based ordering service requires a majority of orderer nodes to agree on each block. A minority coalition cannot rewrite history.
-- The more independent organisations added to the network, the higher the collusion threshold.
+**Verification command**:
+```bash
+make sim-accident
+# Then query the chain for actor W007
+curl http://localhost:8080/events/<fall_event_id>/chain
+# Expected: chain links with ChainValid=true for each step
+```
 
-**Residual risk:** If all organisations collude, the ledger can be forked. This is an inherent property of all permissioned blockchains and is addressed by the trust model assumption: at least one organisation has an incentive to preserve the correct record (e.g., the insurer).
+**Residual risk**: `ts` forgery is not detected (it comes from the IoT platform clock). Investigators must use `tsLedger` as the authoritative timestamp. The gap between `ts` and `tsLedger` is measurable and logged.
 
-### Adversary A4 — External Attacker
+---
 
-**Who:** An external party with no Fabric identity, attempting to read or write records.
+### T4: Insider with write permission submitting false events
 
-**Capabilities:**
-- Network-level access to the Gateway API
-- Ability to send crafted HTTP requests
+**Threat**: An authorised gateway operator submits fabricated safety events (e.g. recording a PPE_VIOLATION for a worker who was not on site) to create false evidence against a worker.
 
-**What the system prevents:**
-- The Gateway API validates all input schemas (Pydantic). Malformed requests are rejected with 422.
-- In production, the Gateway API is not exposed to the public internet — it sits behind the organisation's network perimeter.
-- Fabric peer communication requires mutual TLS authentication.
+**Attack vector**: Calling `POST /events` with forged `actorId` and plausible sensor data.
 
-## Concrete Threat Scenarios
+**Mitigation** (partial):
+1. `recordedByMSP` - the submitting organisation's MSP ID is recorded on every event. False events are traceable to the submitting organisation.
+2. `signerId` + `signerCertFingerprint` - the specific gateway instance is identified on every event.
+3. Endorsement policy - `AND(AuditGatewayMSP, InspectorMSP)` means the inspector peer co-endorses every write transaction. A false event would also carry the inspector's endorsement.
+4. Physical corroboration - `payload_extra` includes GPS coordinates and sensor values that can be cross-checked with physical records.
 
-| ID | Threat | Affected Asset | Attack Vector | System Response |
-|---|---|---|---|---|
-| T1 | Contractor modifies severity of a near-miss from "high" to "low" | Payload integrity | Off-chain file edit | Hash mismatch on next VerifyIntegrity call |
-| T2 | Platform admin deletes a FALL_DETECTED event from the IoT database | Event record | Database delete | Event remains on ledger; deletion only affects raw IoT data, not the audit record |
-| T3 | Contractor re-submits a backdated event to overwrite an existing record | Submission timestamp | POST /events with same event_id | Idempotency check — chaincode rejects duplicate IDs |
-| T4 | Gateway admin forges a new event claiming a worker was in a safe zone at time of incident | Submitter identity | Direct Fabric submit with valid cert | RecordedBy field identifies the submitting MSP; anomaly requires cert compromise, which is auditable via PKI logs |
-| T5 | Attacker replays an old valid event to inflate hazard count | Event record | POST /events with copied payload | Deterministic event_id derived from (site, actor, ts_event, type) — same event produces same ID, rejected as duplicate |
-| T6 | Insurer modifies the exported audit_report.json before presenting it in court | Audit report | File edit | Package hash of the report computed at export time; independent re-export from ledger produces the same hash |
+**Implementation reference**:
+- `auditcc.go` - `RecordedByMSP: mspID` in `RegisterEvent`
+- `fabric/config/configtx.yaml` - endorsement policy definition
+- `gateway/app/signing.py` - `signerCertFingerprint` binds signature to specific gateway key
 
-## What the System Does Not Protect Against
+**Residual risk**: This threat is partially mitigated. The system cannot prevent a determined insider from submitting false events if they have valid credentials. It provides a complete audit trail that makes such fabrication attributable and detectable by cross-referencing with physical evidence.
 
-The following threats are explicitly out of scope for this prototype:
+---
 
-- **Sensor spoofing:** If the physical sensor sends false data (e.g., a worker bypasses a wearable), the ledger faithfully records the false event. The system cannot validate ground truth.
-- **Gateway key compromise before first use:** If an attacker obtains the Gateway private key before deployment, they could submit fraudulent events. Mitigated by HSM-backed key storage in production.
-- **Network-level attacks:** DDoS, BGP hijacking, and similar network-layer threats are out of scope. The system assumes a protected network perimeter.
-- **Social engineering:** Convincing a legitimate operator to submit a false event is a human process vulnerability, not a system vulnerability.
-- **Timestamp accuracy:** The system records `ts_ingest` at the moment the chaincode executes. If the peer node's clock is wrong, the timestamp is wrong. Mitigated by NTP synchronisation of all peer nodes.
+### T5: Replay attack (re-submitting an old event)
 
-## Why This Threat Model Matters for the Thesis
+**Threat**: An attacker replays an old legitimate event (e.g. a ZONE_ENTRY) to inflate incident counts or create confusion in the audit timeline.
 
-The central claim of this thesis is that the audit layer provides stronger guarantees than a conventional append-only database. The threat model makes this claim precise:
+**Attack vector**: Capture a valid submission and re-POST it to the gateway.
 
-A conventional database with an append-only flag controlled by a single administrator (A2) can be bypassed by that administrator. A Fabric ledger with multiple endorsing organisations cannot be unilaterally modified by any single participant — including the administrator who deployed it.
+**Mitigation**: The `eventId` is deterministic: `SHA256(schema:actor:ts:type:zone:nonce)`. Resubmitting the same request produces the same `eventId`, which the chaincode rejects with an idempotency error.
 
-This is the concrete security property that justifies the use of a permissioned blockchain over a simpler append-only store. See `docs/design-rationale.md` for the formal comparison.
+**Implementation reference**:
+- `gateway/app/hashing.py` - `generate_event_id()`
+- `auditcc.go` - `existing, err := ctx.GetStub().GetState(eventID); if existing != nil { return error }`
+
+**Verification command**:
+```bash
+make sim-replay
+# Expected: second submission rejected with "already exists (idempotency check)"
+```
+
+**Residual risk**: An attacker can submit a new event with the same content but a different nonce, which produces a different `eventId` and is accepted. The audit trail will show two events with identical content, which is detectable by investigators.
+
+---
+
+### T6: Single-organisation ledger control (centralisation attack)
+
+**Threat**: Because the contractor controls the gateway (Org1), they could attempt to unilaterally modify the ledger state.
+
+**Attack vector**: Restart the Org1 peer with a modified ledger database, or submit transactions without Org2 endorsement.
+
+**Mitigation**: The Fabric endorsement policy is `AND(AuditGatewayMSP, InspectorMSP)`. Transactions without both organisations' endorsements are rejected by the ordering service. Neither organisation can unilaterally write to the channel.
+
+**Implementation reference**:
+- `fabric/config/configtx.yaml` - `LifecycleEndorsement: MAJORITY Endorsement` and `Endorsement: MAJORITY Endorsement`
+- The chaincode commit step in `fabric/network/network.sh` - `--peerAddresses` includes both peers
+
+**Residual risk**: If both organisations collude, they can modify the ledger. Mitigated in production by adding a third independent observer peer (e.g. regulator) and requiring `OutOf(2, Org1, Org2, Org3)`.
+
+---
+
+## Summary: Threat vs. Mitigation Matrix
+
+| Threat | Attack Vector | Primary Mitigation | Verified By |
+|---|---|---|---|
+| T1 Delete event | Direct DB access | Append-only ledger | `GetHistory` - zero delete entries |
+| T2 Tamper payload | Modify off-chain file | SHA-256 canonical hash | `VerifyEvent` returns FAIL |
+| T3 Reorder events | Forge `ts`, backdated event | `tsLedger` + `prevEventHash` chain | `TraceChain` - ChainValid flags |
+| T4 Insider false event | POST with forged actorId | `recordedByMSP` + dual endorsement | Attribution trail |
+| T5 Replay attack | Re-POST old request | Deterministic `eventId` + idempotency | Second POST rejected |
+| T6 Single-org control | Unilateral ledger write | `AND(Org1, Org2)` endorsement policy | Transaction rejected without dual sig |
+
+---
+
+## Implementation Verification Commands
+
+All mitigations can be verified without Fabric running (stub mode covers T2, T5):
+
+```bash
+make up-stub
+make sim-fraud    # verifies T2: tamper detection
+make sim-replay   # verifies T5: replay rejection
+
+# For T1, T3, T6 - requires full Fabric mode:
+make fabric-up
+make fabric-deploy
+make up-fabric
+make seed
+# Then check GetHistory, TraceChain, and attempt unauthorised write via CLI
+```

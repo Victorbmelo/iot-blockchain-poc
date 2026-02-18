@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-LABEL maintainer="Politecnico di Torino — Audit Layer Thesis"
-LABEL description="Audit Gateway — Immutable IoT Safety Audit Layer"
+LABEL maintainer="Politecnico di Torino - Audit Layer Thesis"
+LABEL description="Audit Gateway - Immutable IoT Safety Audit Layer"
 
 WORKDIR /audit-gateway
 

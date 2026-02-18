@@ -2,7 +2,7 @@
 
 ## System Purpose
 
-The audit layer is designed as a **multi-stakeholder accountability framework**, not a monitoring system. Its goal is to provide tamper-evident records of safety events that are credible to all parties — including the party operating the IoT infrastructure — without requiring any party to trust a single administrator.
+The audit layer is designed as a **multi-stakeholder accountability framework**, not a monitoring system. Its goal is to provide tamper-evident records of safety events that are credible to all parties - including the party operating the IoT infrastructure - without requiring any party to trust a single administrator.
 
 This distinction drives every architectural decision. See `docs/accountability-framework.md` for the formal framework description and `docs/design-rationale.md` for the justification of Hyperledger Fabric over simpler alternatives.
 
@@ -38,7 +38,7 @@ Construction Site
                    gRPC + mutual TLS
                           |
                           v
-         Hyperledger Fabric 2.5 — Permissioned Ledger
+         Hyperledger Fabric 2.5 - Permissioned Ledger
 
            Org1 (Contractor)    Org2 (Inspector/Insurer)
              peer0                peer0
@@ -62,7 +62,7 @@ Construction Site
 
 The architecture is shaped by three non-negotiable constraints:
 
-**Low coupling:** The system must be attachable to any existing IoT safety platform without requiring that platform to be redesigned. The Gateway accepts a simple HTTP POST — the IoT platform does not need to know about Fabric.
+**Low coupling:** The system must be attachable to any existing IoT safety platform without requiring that platform to be redesigned. The Gateway accepts a simple HTTP POST - the IoT platform does not need to know about Fabric.
 
 **No single point of trust:** No organisation controls the ledger unilaterally. The endorsement policy requires signatures from multiple independent organisations on every write transaction. This is the property that distinguishes the system from a conventional append-only database.
 
@@ -184,7 +184,7 @@ Result: PASS if payload matches; FAIL with both hashes if tampered
 | Site Inspector | Org2 | no | yes | yes | yes |
 | Insurance Adjuster | Org2 | no | yes | yes | yes |
 
-Write access is enforced by the Fabric endorsement policy — a write transaction that does not carry valid signatures from the required MSPs will not be committed. Read access is enforced at the Gateway API layer in this prototype.
+Write access is enforced by the Fabric endorsement policy - a write transaction that does not carry valid signatures from the required MSPs will not be committed. Read access is enforced at the Gateway API layer in this prototype.
 
 ## Why CouchDB
 
@@ -192,9 +192,9 @@ The Fabric state database must support rich queries (filtering by actor, zone, t
 
 ## Related Documents
 
-- `docs/accountability-framework.md` — Formal framework description, verification protocol, accountability matrix
-- `docs/threat-model.md` — Adversary definitions, concrete threat scenarios, residual risks
-- `docs/design-rationale.md` — Formal comparison with append-only database; justification for blockchain
-- `docs/legal-use-cases.md` — Concrete forensic and legal scenarios with step-by-step procedures
-- `docs/experiment-plan.md` — Validation experiments with acceptance criteria
-- `docs/api-spec.md` — REST API reference
+- `docs/accountability-framework.md` - Formal framework description, verification protocol, accountability matrix
+- `docs/threat-model.md` - Adversary definitions, concrete threat scenarios, residual risks
+- `docs/design-rationale.md` - Formal comparison with append-only database; justification for blockchain
+- `docs/legal-use-cases.md` - Concrete forensic and legal scenarios with step-by-step procedures
+- `docs/experiment-plan.md` - Validation experiments with acceptance criteria
+- `docs/api-spec.md` - REST API reference
