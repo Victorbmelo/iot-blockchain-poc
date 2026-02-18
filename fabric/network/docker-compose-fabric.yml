@@ -1,0 +1,249 @@
+version: "3.9"
+
+# Hyperledger Fabric 2.5 network for the Audit Layer prototype.
+#
+# Organisations:
+#   Org1 (AuditGatewayMSP) — operates the IoT Gateway, submits events (writer)
+#   Org2 (InspectorMSP)    — site inspector / insurer, read-only peer (endorser)
+#
+# Endorsement policy: AND(AuditGatewayMSP.peer, InspectorMSP.peer)
+# This means neither organisation can alter the ledger without the other's signature.
+#
+# Usage:
+#   bash fabric/network/network.sh up      # generate certs + start network
+#   bash fabric/network/network.sh deploy  # deploy auditcc chaincode
+#   bash fabric/network/network.sh down    # stop and clean
+
+x-fabric-base: &fabric-base
+  image: hyperledger/fabric-peer:2.5
+  environment:
+    - FABRIC_LOGGING_SPEC=INFO
+    - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+    - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=audit_fabric
+  volumes:
+    - /var/run/docker.sock:/host/var/run/docker.sock
+
+networks:
+  audit_fabric:
+    name: audit_fabric
+    driver: bridge
+
+volumes:
+  orderer0.data:
+  peer0.org1.data:
+  peer0.org2.data:
+  couchdb0.data:
+  couchdb1.data:
+
+services:
+
+  # Certificate Authority — Org1
+  ca.org1.audit.local:
+    image: hyperledger/fabric-ca:1.5
+    container_name: ca.org1.audit.local
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca-org1
+      - FABRIC_CA_SERVER_TLS_ENABLED=true
+      - FABRIC_CA_SERVER_PORT=7054
+    ports:
+      - "7054:7054"
+    volumes:
+      - ./crypto-material/peerOrganizations/org1.audit.local/ca:/etc/hyperledger/fabric-ca-server
+    networks:
+      - audit_fabric
+
+  # Certificate Authority — Org2
+  ca.org2.audit.local:
+    image: hyperledger/fabric-ca:1.5
+    container_name: ca.org2.audit.local
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca-org2
+      - FABRIC_CA_SERVER_TLS_ENABLED=true
+      - FABRIC_CA_SERVER_PORT=8054
+    ports:
+      - "8054:8054"
+    volumes:
+      - ./crypto-material/peerOrganizations/org2.audit.local/ca:/etc/hyperledger/fabric-ca-server
+    networks:
+      - audit_fabric
+
+  # Orderer — RAFT single node
+  orderer0.orderer.audit.local:
+    image: hyperledger/fabric-orderer:2.5
+    container_name: orderer0.orderer.audit.local
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=none
+      - ORDERER_CHANNELPARTICIPATION_ENABLED=true
+      - ORDERER_ADMIN_TLS_ENABLED=true
+      - ORDERER_ADMIN_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_ADMIN_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_ADMIN_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_LISTENADDRESS=0.0.0.0:7053
+      - ORDERER_OPERATIONS_LISTENADDRESS=0.0.0.0:17050
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric
+    command: orderer
+    volumes:
+      - ./crypto-material/ordererOrganizations/orderer.audit.local/orderers/orderer0.orderer.audit.local/msp:/var/hyperledger/orderer/msp
+      - ./crypto-material/ordererOrganizations/orderer.audit.local/orderers/orderer0.orderer.audit.local/tls:/var/hyperledger/orderer/tls
+      - orderer0.data:/var/hyperledger/production/orderer
+    ports:
+      - "7050:7050"
+      - "7053:7053"
+      - "17050:17050"
+    networks:
+      - audit_fabric
+
+  # CouchDB for Org1 peer (enables rich queries / composite key range scans)
+  couchdb0:
+    image: couchdb:3.3
+    container_name: couchdb0
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5984:5984"
+    volumes:
+      - couchdb0.data:/opt/couchdb/data
+    networks:
+      - audit_fabric
+
+  # Org1 peer — AuditGatewayMSP (writer)
+  peer0.org1.audit.local:
+    <<: *fabric-base
+    container_name: peer0.org1.audit.local
+    environment:
+      - CORE_PEER_ID=peer0.org1.audit.local
+      - CORE_PEER_ADDRESS=peer0.org1.audit.local:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org1.audit.local:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.audit.local:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.audit.local:7051
+      - CORE_PEER_LOCALMSPID=AuditGatewayMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:17051
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=audit_fabric
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./crypto-material/peerOrganizations/org1.audit.local/peers/peer0.org1.audit.local/msp:/etc/hyperledger/fabric/msp
+      - ./crypto-material/peerOrganizations/org1.audit.local/peers/peer0.org1.audit.local/tls:/etc/hyperledger/fabric/tls
+      - peer0.org1.data:/var/hyperledger/production
+    ports:
+      - "7051:7051"
+      - "17051:17051"
+    depends_on:
+      - couchdb0
+      - orderer0.orderer.audit.local
+    networks:
+      - audit_fabric
+
+  # CouchDB for Org2 peer
+  couchdb1:
+    image: couchdb:3.3
+    container_name: couchdb1
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "6984:5984"
+    volumes:
+      - couchdb1.data:/opt/couchdb/data
+    networks:
+      - audit_fabric
+
+  # Org2 peer — InspectorMSP (read + endorser)
+  peer0.org2.audit.local:
+    <<: *fabric-base
+    container_name: peer0.org2.audit.local
+    environment:
+      - CORE_PEER_ID=peer0.org2.audit.local
+      - CORE_PEER_ADDRESS=peer0.org2.audit.local:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org2.audit.local:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org2.audit.local:9051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org2.audit.local:9051
+      - CORE_PEER_LOCALMSPID=InspectorMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb1:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:17052
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=audit_fabric
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./crypto-material/peerOrganizations/org2.audit.local/peers/peer0.org2.audit.local/msp:/etc/hyperledger/fabric/msp
+      - ./crypto-material/peerOrganizations/org2.audit.local/peers/peer0.org2.audit.local/tls:/etc/hyperledger/fabric/tls
+      - peer0.org2.data:/var/hyperledger/production
+    ports:
+      - "9051:9051"
+      - "17052:17052"
+    depends_on:
+      - couchdb1
+      - orderer0.orderer.audit.local
+    networks:
+      - audit_fabric
+
+  # CLI — admin container for channel creation and chaincode lifecycle
+  cli:
+    image: hyperledger/fabric-tools:2.5
+    container_name: audit_cli
+    tty: true
+    stdin_open: true
+    environment:
+      - GOPATH=/opt/gopath
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.org1.audit.local:7051
+      - CORE_PEER_LOCALMSPID=AuditGatewayMSP
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/opt/crypto/peerOrganizations/org1.audit.local/peers/peer0.org1.audit.local/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/opt/crypto/peerOrganizations/org1.audit.local/peers/peer0.org1.audit.local/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/crypto/peerOrganizations/org1.audit.local/peers/peer0.org1.audit.local/tls/ca.crt
+      - CORE_PEER_MSPCONFIGPATH=/opt/crypto/peerOrganizations/org1.audit.local/users/Admin@org1.audit.local/msp
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./crypto-material:/opt/crypto
+      - ./channel-artifacts:/opt/channel-artifacts
+      - ../chaincode/auditcc:/opt/gopath/src/github.com/chaincode/auditcc
+      - ./scripts:/opt/scripts
+    depends_on:
+      - peer0.org1.audit.local
+      - peer0.org2.audit.local
+    networks:
+      - audit_fabric

@@ -1,79 +1,64 @@
 #!/usr/bin/env bash
-# Start the Audit Layer stack.
+# Start the Audit Layer application stack.
 #
 # Modes:
-#   --stub    In-memory ledger, no Docker (default)
-#   --docker  Gateway + MinIO via Docker Compose
-#   --fabric  Fabric test-network + chaincode + gateway
+#   --stub    Gateway with in-memory ledger (default — no Docker, no Fabric)
+#   --docker  Gateway + MinIO via Docker Compose, in-memory stub
+#   --fabric  Gateway + MinIO via Docker Compose, connected to real Fabric network
 #
-# Prerequisites for --fabric:
-#   fabric-samples at $FABRIC_SAMPLES_DIR (default: ~/fabric-samples)
-#   Install: curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7
+# For --fabric: start the Fabric network first:
+#   make fabric-up
+#   make fabric-deploy
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 MODE="${1:---stub}"
-FABRIC_SAMPLES_DIR="${FABRIC_SAMPLES_DIR:-$HOME/fabric-samples}"
-CHANNEL="mychannel"
-CHAINCODE_NAME="auditcc"
+NETWORK_DIR="$PROJECT_ROOT/fabric/network"
 
 case "$MODE" in
     --stub)
-        echo "Starting gateway in stub mode"
+        echo "Starting gateway in stub mode (in-memory ledger)"
         cd "$PROJECT_ROOT/gateway"
-        FABRIC_STUB_MODE=true uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+        FABRIC_STUB_MODE=true \
+        RESULTS_DIR="$PROJECT_ROOT/results" \
+        uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
         ;;
 
     --docker)
-        echo "Starting via Docker Compose"
+        echo "Starting application stack via Docker Compose (stub mode)"
         cd "$PROJECT_ROOT"
-        docker compose up --build -d
+        FABRIC_STUB_MODE=true docker compose up --build -d
         echo "Gateway : http://localhost:8080"
-        echo "Docs    : http://localhost:8080/docs"
+        echo "API docs: http://localhost:8080/docs"
         echo "MinIO   : http://localhost:9001  (minioadmin / minioadmin)"
-        echo "Dashboard: streamlit run dashboard/app.py"
         ;;
 
     --fabric)
-        if [ ! -d "$FABRIC_SAMPLES_DIR" ]; then
-            echo "fabric-samples not found at $FABRIC_SAMPLES_DIR"
-            echo "Install: curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.5.0 1.5.7"
+        # Verify Fabric network is running
+        if ! docker ps --format '{{.Names}}' | grep -q "peer0.org1.audit.local"; then
+            echo "Fabric network is not running."
+            echo "Start it first: make fabric-up && make fabric-deploy"
             exit 1
         fi
 
-        NETWORK_DIR="$FABRIC_SAMPLES_DIR/test-network"
-        CHAINCODE_SRC="$PROJECT_ROOT/fabric/chaincode/auditcc"
+        echo "Starting application stack connected to Fabric network"
+        cd "$PROJECT_ROOT"
 
-        echo "[1/4] Stopping previous network"
-        cd "$NETWORK_DIR" && ./network.sh down 2>/dev/null || true
+        # Export TLS cert path for gateway container volume mount
+        ORG1_TLS_CA="$NETWORK_DIR/crypto-material/peerOrganizations/org1.audit.local/peers/peer0.org1.audit.local/tls/ca.crt"
+        if [ ! -f "$ORG1_TLS_CA" ]; then
+            echo "Fabric crypto material not found. Run: make fabric-up"
+            exit 1
+        fi
 
-        echo "[2/4] Starting network with CouchDB (required for composite key queries)"
-        ./network.sh up createChannel -ca -c "$CHANNEL" -s couchdb
-
-        echo "[3/4] Deploying chaincode"
-        ./network.sh deployCC \
-            -ccn "$CHAINCODE_NAME" \
-            -ccp "$CHAINCODE_SRC" \
-            -ccl go \
-            -ccv 1.0 \
-            -ccs 1 \
-            -c "$CHANNEL"
-
-        echo "[4/4] Starting gateway"
-        cd "$PROJECT_ROOT/gateway"
-
-        export FABRIC_PEER_ENDPOINT="localhost:7051"
-        export FABRIC_CHANNEL="$CHANNEL"
-        export FABRIC_CHAINCODE="$CHAINCODE_NAME"
-        export FABRIC_PEER_TLS_CERT="$NETWORK_DIR/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"
-        export FABRIC_GATEWAY_CERT="$NETWORK_DIR/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/cert.pem"
-        export FABRIC_GATEWAY_KEY
-        FABRIC_GATEWAY_KEY="$(ls "$NETWORK_DIR/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore/"*_sk 2>/dev/null | head -1)"
-        export FABRIC_STUB_MODE=false
-
-        uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+        FABRIC_STUB_MODE=false docker compose up --build -d
+        echo "Gateway : http://localhost:8080 (connected to Fabric)"
+        echo "API docs: http://localhost:8080/docs"
+        echo "MinIO   : http://localhost:9001"
+        echo "CouchDB0: http://localhost:5984/_utils"
+        echo "CouchDB1: http://localhost:6984/_utils"
         ;;
 
     *)

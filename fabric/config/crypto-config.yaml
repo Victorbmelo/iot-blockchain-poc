@@ -1,0 +1,22 @@
+OrdererOrgs:
+  - Name: Orderer
+    Domain: orderer.audit.local
+    Specs:
+      - Hostname: orderer0
+
+PeerOrgs:
+  - Name: AuditGateway
+    Domain: org1.audit.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+    Users:
+      Count: 1
+
+  - Name: Inspector
+    Domain: org2.audit.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+    Users:
+      Count: 1

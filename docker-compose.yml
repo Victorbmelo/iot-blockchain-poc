@@ -1,7 +1,31 @@
 version: "3.9"
 
-# For a real Hyperledger Fabric network, use ./scripts/up.sh --fabric instead.
-# This Compose file runs the gateway in stub mode alongside MinIO for off-chain storage.
+# Application stack: gateway + MinIO.
+# For the full Fabric network see fabric/network/docker-compose-fabric.yml.
+#
+# Modes:
+#   Stub (default):  FABRIC_STUB_MODE=true  — in-memory ledger, no Fabric required
+#   Fabric:          FABRIC_STUB_MODE=false  — connects to fabric/network/ containers
+#
+# Quick start (stub mode):
+#   docker compose up --build
+#
+# Full Fabric mode (start Fabric first):
+#   bash fabric/network/network.sh up
+#   bash fabric/network/network.sh deploy
+#   FABRIC_STUB_MODE=false docker compose up --build
+
+networks:
+  audit_app:
+    name: audit_app
+    driver: bridge
+  audit_fabric:
+    name: audit_fabric
+    external: true
+
+volumes:
+  minio-data:
+    name: audit-minio-data
 
 services:
 
@@ -13,17 +37,26 @@ services:
     ports:
       - "8080:8080"
     environment:
-      FABRIC_STUB_MODE: "true"
+      FABRIC_STUB_MODE: "${FABRIC_STUB_MODE:-true}"
       LOG_LEVEL: "INFO"
-      # To connect to a real Fabric network, set the following and set FABRIC_STUB_MODE to "false":
-      # FABRIC_PEER_ENDPOINT: "peer0.org1.example.com:7051"
-      # FABRIC_CHANNEL: "mychannel"
-      # FABRIC_CHAINCODE: "auditcc"
+      RESULTS_DIR: "/results"
+      GATEWAY_SIGNER_ID: "audit-gateway-01"
+      # Fabric connection (used when FABRIC_STUB_MODE=false):
+      FABRIC_PEER_ENDPOINT: "peer0.org1.audit.local:7051"
+      FABRIC_CHANNEL: "audit-channel"
+      FABRIC_CHAINCODE: "auditcc"
+      FABRIC_PEER_TLS_CERT: "/certs/peer0-org1-tls-ca.crt"
+      FABRIC_GATEWAY_CERT: "/certs/gateway-client.crt"
+      FABRIC_GATEWAY_KEY: "/certs/gateway-client.key"
     volumes:
       - ./gateway/app:/audit-gateway/app
-      - ./certs:/certs:ro
+      - ./fabric/network/crypto-material:/certs:ro
+      - ./results:/results
     depends_on:
       - minio
+    networks:
+      - audit_app
+      - audit_fabric
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
@@ -43,6 +76,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio-data:/data
+    networks:
+      - audit_app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
@@ -50,7 +85,7 @@ services:
       timeout: 5s
       retries: 5
 
-  createbucket:
+  minio-init:
     image: minio/mc:latest
     container_name: audit-minio-init
     depends_on:
@@ -61,10 +96,8 @@ services:
         mc alias set local http://minio:9000 minioadmin minioadmin;
         mc mb --ignore-existing local/audit-evidence;
         mc anonymous set download local/audit-evidence;
-        echo 'MinIO bucket ready';
+        echo 'MinIO bucket ready: audit-evidence';
       "
+    networks:
+      - audit_app
     restart: "no"
-
-volumes:
-  minio-data:
-    name: audit-minio-data
