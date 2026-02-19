@@ -278,6 +278,15 @@ async def _fetch_grouped(pool, col, limit=50):
         )
 
 
+async def get_oldest_failed_batch() -> Optional[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM batches WHERE anchor_status='FAILED' ORDER BY created_at ASC LIMIT 1"
+        )
+        return dict(row) if row else None
+
+
 async def get_pending_events(limit=500) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -315,7 +324,8 @@ async def mark_events_failed(batch_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE events SET anchor_status='PENDING', batch_id=NULL WHERE batch_id=$1", batch_id
+            "UPDATE events SET anchor_status='BATCHED' WHERE batch_id=$1",
+            batch_id
         )
 
 

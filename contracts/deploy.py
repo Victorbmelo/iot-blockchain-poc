@@ -84,7 +84,8 @@ def deploy():
     })
 
     signed = account.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    raw = getattr(signed, "rawTransaction", None) or getattr(signed, "raw_transaction")
+    tx_hash = w3.eth.send_raw_transaction(raw)
     print(f"Deploy tx: {tx_hash.hex()}")
 
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)

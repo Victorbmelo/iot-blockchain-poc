@@ -263,17 +263,12 @@ def main():
     parser.add_argument("--gateway", default=GATEWAY)
     args = parser.parse_args()
 
-    SESSION.base_url = args.gateway
-
-    # Override session base for non-default gateway
-    global GATEWAY
-    GATEWAY = args.gateway
-
-    print(f"Gateway: {GATEWAY}  scenario={args.scenario}  eps={args.eps}  duration={args.duration}s")
+    gateway = args.gateway
+    print(f"Gateway: {gateway}  scenario={args.scenario}  eps={args.eps}  duration={args.duration}s")
 
     # Check gateway connectivity
     try:
-        h = SESSION.get(f"{GATEWAY}/health", timeout=5).json()
+        h = SESSION.get(f"{gateway}/health", timeout=5).json()
         print(f"Connected - schema={h.get('schema_version')} backend={h.get('ledger_backend')}")
     except Exception as exc:
         print(f"Cannot reach gateway: {exc}", file=sys.stderr)

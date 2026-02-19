@@ -35,191 +35,291 @@ Verifier (independent)
   4. Compare -> PASS or FAIL + reason
 ```
 
-**Why batching + Merkle?**
+---
 
-A common banca objection to blockchain audit layers is scalability. This design answers it directly: at 100 events/second with a 5-second window, the ledger sees 1 anchor transaction per 5 seconds (not 500). The Merkle tree provides the same tamper-evidence guarantee as storing all hashes individually, at O(log N) proof overhead.
+## Why batching + Merkle?
 
-**Why Besu (permissioned EVM) and not public Ethereum?**
+At 100 events/second with a 5-second window, the ledger sees **1 transaction per 5 seconds**, not 500.
 
-- Zero gas fees (dev/QBFT network)
-- Only `authorisedSubmitters` can call `storeBatchRoot` (RBAC in contract)
-- No data leakage to public network
-- Runs entirely in Docker - no token purchase, no external dependency
-- Swap to Fabric by setting `LEDGER_BACKEND=fabric` and implementing `services/audit-gateway/app/ledger/fabric.py`
+The Merkle tree preserves tamper-evidence with:
+
+* O(log N) proof size
+* Constant on-chain storage
+* Linear off-chain scalability
+
+This directly answers scalability objections from academic committees.
 
 ---
 
-## Quick Start (WSL2 / Linux)
+## Why Besu (permissioned EVM)?
 
-**Prerequisites:**
+* No public gas costs
+* Controlled validators
+* RBAC enforced in smart contract
+* Fully local reproducibility
+* Swappable backend (`LEDGER_BACKEND=fabric`)
+
+---
+
+# Quick Start (WSL2 / Linux)
+
+## Prerequisites
+
 ```bash
-# Docker Desktop with WSL2 integration, or Docker Engine on Linux
-docker --version   # 24+
-docker compose version  # 2.x
+docker --version      # 24+
+docker compose version
+make --version
 ```
 
-**Start everything:**
+---
+
+## First Time Setup
+
 ```bash
 git clone <repo>
 cd iot-blockchain-poc
-make up               # Postgres + Besu + Gateway (waits for healthy)
-make deploy-contract  # Deploy AuditAnchor.sol (run once)
+make up
+make deploy-contract
 ```
 
-**Generate data:**
+! If you ever run:
+
 ```bash
-make seed     # 200 events at 1 eps for 200s
-make stats    # event counts + batch status
+docker compose down -v
 ```
 
-**Run demo (thesis defense):**
+You MUST re-run:
+
 ```bash
-make demo              # all 4 scenes (interactive)
-make demo-fraud        # just the tamper detection scene
+make deploy-contract
 ```
 
-**Verify integrity:**
+because the blockchain state was erased.
+
+---
+
+# Full Reset (Hard Clean Rebuild)
+
+Use this if:
+
+* Code changes are not reflected
+* Python container still runs old code
+* Weird Docker caching issues
+* Besu behaving inconsistently
+
 ```bash
-make verify            # all anchored batches -> PASS/FAIL
-make fraud-cases       # T1/T2/T3 fraud scenarios
+docker compose down -v --remove-orphans
+docker image rm -f \
+  iot-blockchain-poc-iot-sim \
+  iot-blockchain-poc-audit-gateway \
+  iot-blockchain-poc-contract-deployer 2>/dev/null || true
+docker builder prune -af
 ```
 
-**Run Chapter 5 experiments:**
+Then:
+
 ```bash
-make exp-all EPS=10 DURATION=120   # all experiments -> results/
-python scripts/collect_metrics.py  # print + CSV for LaTeX table
+make up
+make deploy-contract
+```
+
+This guarantees:
+
+* Fresh volumes
+* Fresh images
+* No stale layers
+* No cached sim.py
+* Clean chain state
+
+
+**or**
+
+
+# Soft Reset
+
+```bash
+# Full reset (clean state)
+docker compose down -v
+docker system prune -f
+
+# Rebuild images after code changes
+docker compose build --no-cache audit-gateway verifier iot-sim
+
+# Start stack
+make up
+make deploy-contract
+
+# Generate events + wait batch window
+make seed
+sleep 8
+
+# Inspect + verify
+make stats
+make verify
 ```
 
 ---
 
-## Ports
+# Normal Workflow
 
-| Service | Port | URL |
-|---|---|---|
-| Audit Gateway | 8000 | http://localhost:8000 |
-| API docs | 8000 | http://localhost:8000/docs |
-| Demo UI | 8000 | http://localhost:8000/ui |
-| PostgreSQL | 5432 | postgresql://audit:audit@localhost/auditdb |
-| Besu JSON-RPC | 8545 | http://localhost:8545 |
-| Besu WebSocket | 8546 | ws://localhost:8546 |
+## Generate data
 
----
-
-## Roles and Access Control
-
-Pass `X-Role: <role>` header. In production, role is derived from client TLS certificate MSP attribute.
-
-| Role | Submit | Read | Verify | Export |
-|---|---|---|---|---|
-| operator | [OK] | - | - | - |
-| safety_manager | - | [OK] | - | - |
-| inspector | - | [OK] | [OK] | [OK] |
-| insurer | - | [OK] | [OK] | - |
-
----
-
-## What is in the event hash?
-
-Fields included in `SHA-256(canonical_json(event))`:
-
-```
-schema_version, event_type, ts, site_id, zone_id, actor_id, severity, source, payload
+```bash
+make seed
+make stats
 ```
 
-Fields **excluded** from the hash:
-- `nonce` - used only for idempotent event ID generation
-- `evidence_ref` - URI set asynchronously after submission
+## Verify integrity
 
-Any modification to any included field produces a different hash, detectable by the verifier.
-
----
-
-## Threat Mitigations
-
-| Threat | Mechanism |
-|---|---|
-| T1: Delete event from batch | Event hash absent from Merkle tree -> verify FAIL |
-| T2: Tamper event payload | SHA-256 mismatch -> recomputed hash != stored hash -> FAIL |
-| T3: Inject fake event | Injected hash changes Merkle root -> anchor mismatch -> FAIL |
-| T4: Reorder events | Batch window bounds in `metaHash` are immutable on-chain |
-| T5: Replay batch anchor | `storeBatchRoot` reverts on duplicate batchId (write-once) |
-| T6: Unilateral ledger write | `authorisedSubmitters` RBAC in contract; extensible to multisig |
-
----
-
-## Project Structure
-
+```bash
+make verify
+make fraud-cases
 ```
-iot-blockchain-poc/
-├── docker-compose.yml
-├── Makefile
-├── README.md
-├── contracts/
-│   ├── AuditAnchor.sol       - write-once batch anchor (Solidity)
-│   ├── deploy.py             - Python deployer (web3.py)
-│   └── deployed.json         - address + ABI after deployment
-├── services/
-│   ├── audit-gateway/
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── app/
-│   │       ├── main.py       - FastAPI: ingest, batch, verify endpoints
-│   │       ├── schemas.py    - Event schema (CANONICAL_FIELDS list)
-│   │       ├── batching.py   - Batch window builder + anchor worker
-│   │       ├── merkle.py     - Binary Merkle tree (canonical, sorted)
-│   │       ├── db.py         - PostgreSQL DAL (events, batches)
-│   │       ├── roles.py      - RBAC (operator/safety_manager/inspector/insurer)
-│   │       └── ledger/
-│   │           ├── adapter.py - Backend selector (stub/besu/fabric)
-│   │           ├── besu.py    - Besu/web3.py implementation
-│   │           └── fabric.py  - Fabric placeholder
-│   ├── iot-sim/
-│   │   ├── Dockerfile
-│   │   └── sim.py            - 5 scenarios: normal/accident/near_miss/fraud/load
-│   └── verifier/
-│       ├── Dockerfile
-│       └── verify.py         - T1/T2/T3 fraud cases + batch/event verify
-├── scripts/
-│   ├── demo.sh               - 4-scene thesis defense demo
-│   ├── run_experiment.py     - E1–E6 experiments → CSV
-│   └── collect_metrics.py    - Aggregate CSVs → Chapter 5 table
-├── docs/
-│   ├── architecture.md
-│   ├── audit-event-contract.md
-│   ├── threat-model.md
-│   └── ...
-└── results/
-    └── E5_20241115_143022/
-        ├── events.csv
-        ├── metrics.csv
-        └── report.json
+
+## Demo (thesis defense)
+
+```bash
+make demo
+make demo-fraud
 ```
 
 ---
 
-## Chapter 5 Experiments
-
-| Exp | Name | What it measures |
-|---|---|---|
-| E1 | Functional Correctness | All fields stored correctly, idempotency |
-| E2 | Tamper Detection | 20 PASS + 20 FAIL detection rate |
-| E3 | Batch Integrity | Merkle root matches Besu anchor |
-| E4 | Incident End-to-End | 7-event chain queryability |
-| E5 | Throughput | p50/p95/p99 at configurable EPS |
-| E6 | Fraud Verification | T1/T2/T3 detection via Merkle proof |
+# Chapter 5 Experiments
 
 ```bash
 make exp-all EPS=10 DURATION=120
 python scripts/collect_metrics.py
-# Prints and saves results/chapter5_table.csv
+```
+
+Outputs:
+
+```
+results/<timestamp>/
+  events.csv
+  metrics.csv
+  report.json
+```
+
+Use:
+
+```
+results/chapter5_table.csv
+```
+
+for LaTeX tables.
+
+---
+
+# Ports
+
+| Service       | Port | URL                                                      |
+| ------------- | ---- | -------------------------------------------------------- |
+| Audit Gateway | 8000 | [http://localhost:8000](http://localhost:8000)           |
+| API Docs      | 8000 | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| Demo UI       | 8000 | [http://localhost:8000/ui](http://localhost:8000/ui)     |
+| PostgreSQL    | 5432 | postgresql://audit:audit@localhost/auditdb               |
+| Besu RPC      | 8545 | [http://localhost:8545](http://localhost:8545)           |
+
+---
+
+# Common Errors & Fixes
+
+---
+
+## 1) Besu container unhealthy
+
+Cause: healthcheck using curl but curl not installed.
+
+Fix: use process-based healthcheck in docker-compose.
+
+---
+
+## 2) Contract deploy fails with:
+
+```
+AttributeError: raw_transaction
+```
+
+Fix in deploy.py:
+
+```python
+raw = getattr(signed, "rawTransaction", None) or getattr(signed, "raw_transaction")
+tx_hash = w3.eth.send_raw_transaction(raw)
 ```
 
 ---
 
-## Notes on Configuration
+## 3) Account balance = 0 ETH
 
-All claimed performance numbers in the thesis should reference the experiment output in `results/` and be labelled:
+Expected in local Besu if genesis has no alloc.
 
-> "Measured in simulated environment (Docker on WSL2). Real-network performance subject to validator count, block time, and network latency."
+For development network, zero gas is acceptable.
 
-This is standard practice and pre-empts the "you measured this in simulation" objection.
+If using gas > 0, add alloc in genesis.
+
+---
+
+## 4) sim.py SyntaxError (global GATEWAY)
+
+Ensure:
+
+```python
+def main():
+    global GATEWAY
+```
+
+appears BEFORE using GATEWAY.
+
+Then rebuild:
+
+```bash
+docker compose build --no-cache iot-sim
+```
+
+---
+
+## 5) Code changes not reflected
+
+Docker cached old image.
+
+Run:
+
+```bash
+docker builder prune -af
+docker compose build --no-cache
+```
+
+---
+
+# Roles and Access Control
+
+Header:
+
+```
+X-Role: operator | safety_manager | inspector | insurer
+```
+
+In production:
+
+* Role derived from client TLS certificate.
+
+---
+
+# Threat Mitigations
+
+| Threat                 | Mechanism            |
+| ---------------------- | -------------------- |
+| T1: Delete event       | Merkle root mismatch |
+| T2: Tamper payload     | SHA-256 mismatch     |
+| T3: Inject fake event  | Anchor mismatch      |
+| T4: Reorder events     | metaHash immutable   |
+| T5: Replay anchor      | write-once mapping   |
+| T6: Unauthorized write | RBAC in contract     |
+
+---
+
+# Reproducibility Note
+
+All measurements must state:
+> Measured in Docker-based simulated environment (WSL2). Real-world performance depends on validator count, block time, and network latency.

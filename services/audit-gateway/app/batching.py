@@ -29,6 +29,7 @@ from .db import (
     compute_meta_hash, get_pending_events, insert_batch,
     mark_events_anchored, mark_events_failed, mark_events_in_batch,
     update_batch_anchored, update_batch_failed, utc_now,
+    get_oldest_failed_batch, get_batch_events,
 )
 from .merkle import compute_root
 from .ledger.adapter import anchor_batch
@@ -51,6 +52,25 @@ async def batch_worker():
 
 
 async def _close_batch():
+    # 1) Retry path: if there is a FAILED batch, retry anchoring it (same batch_id)
+    failed = await get_oldest_failed_batch()
+    if failed:
+        batch_id = failed["batch_id"]
+        log.info("retrying FAILED batch %s", batch_id[:50])
+
+        result = await anchor_batch(batch_id, failed["merkle_root"], failed["meta_hash"])
+        if result.success:
+            await update_batch_anchored(batch_id, result.tx_hash, result.block_ts)
+            await mark_events_anchored(batch_id)
+            log.info("anchored (retry) batch %s tx=%s", batch_id[:40], (result.tx_hash or "")[:18])
+        else:
+            # keep it FAILED; keep events in BATCHED; will retry later
+            await update_batch_failed(batch_id)
+            await mark_events_failed(batch_id)
+            log.error("retry anchor failed for %s: %s", batch_id[:40], result.error)
+        return
+
+    # 2) Normal path: close a NEW batch from pending events
     window_end = utc_now()
     events = await get_pending_events(limit=1000)
 
@@ -63,12 +83,11 @@ async def _close_batch():
     site_id = site_ids[0] if len(site_ids) == 1 else "multi"
 
     event_hashes = [e["event_hash"] for e in events]
-    event_ids    = [e["event_id"]   for e in events]
-    merkle_root  = compute_root(event_hashes)
-    meta_hash    = compute_meta_hash(batch_id, window_start, window_end,
-                                     len(events), site_id)
+    event_ids = [e["event_id"] for e in events]
+    merkle_root = compute_root(event_hashes)
+    meta_hash = compute_meta_hash(batch_id, window_start, window_end, len(events), site_id)
 
-    log.info("closing batch %s: %d events  root=%s", batch_id, len(events), merkle_root[:16])
+    log.info("closing batch %s: %d events root=%s", batch_id, len(events), merkle_root[:16])
 
     batch = {
         "batch_id": batch_id,
@@ -87,8 +106,8 @@ async def _close_batch():
     if result.success:
         await update_batch_anchored(batch_id, result.tx_hash, result.block_ts)
         await mark_events_anchored(batch_id)
-        log.info("anchored batch %s  tx=%s", batch_id, result.tx_hash[:20] if result.tx_hash else "?")
+        log.info("anchored batch %s tx=%s", batch_id[:40], (result.tx_hash or "")[:18])
     else:
         await update_batch_failed(batch_id)
         await mark_events_failed(batch_id)
-        log.error("anchor failed for batch %s: %s", batch_id, result.error)
+        log.error("anchor failed for batch %s: %s", batch_id[:40], result.error)

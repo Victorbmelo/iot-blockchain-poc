@@ -26,7 +26,7 @@ help:
 	@echo "  make deploy-contract Deploy AuditAnchor.sol to Besu"
 	@echo ""
 	@echo "Data"
-	@echo "  make seed            200 normal events at 1 eps for 200s"
+	@echo "  make seed            Seed EPS=$(EPS) for $(DURATION)s"
 	@echo "  make load            Load test: EPS=$(EPS) for $(DURATION)s"
 	@echo "  make stats           Show event counts and batch status"
 	@echo ""
@@ -85,7 +85,7 @@ seed:
 	docker compose run --rm \
 	  -e GATEWAY_URL=http://audit-gateway:8000 \
 	  --entrypoint python \
-	  iot-sim sim.py --scenario normal --eps 1 --duration 200 \
+	  iot-sim sim.py --scenario normal --eps $(EPS) --duration $(DURATION) \
 	    --gateway http://audit-gateway:8000
 
 load:
